@@ -270,14 +270,20 @@ def build_dispatcher() -> Dispatcher:
     async def cb_leads(cb: CallbackQuery):
         async with aiosqlite.connect(DB_PATH) as db:
             cur = await db.execute(
-                "SELECT created_at,name,surname,phone,percent FROM leads "
+                "SELECT id,created_at,name,surname,phone,percent FROM leads "
                 "ORDER BY id DESC LIMIT 10"
             )
             rows = await cur.fetchall()
         if not rows:
             txt = "📥 <b>Lidlar</b>\n\nHozircha lidlar yo'q."
         else:
-            body = "\n".join(f"• {r[0]} — <b>{r[1]} {r[2]}</b> | {r[3]} | {r[4]}%" for r in rows)
+            def serial_of(lid):
+                idx = (lid - 1) % (26 * 9999)
+                return f"{chr(ord('A') + idx // 9999)}{(idx % 9999) + 1:04d}"
+            body = "\n".join(
+                f"<code>#{serial_of(r[0])}</code> {r[1]} — <b>{r[2]} {r[3]}</b> | {r[4]} | {r[5]}%"
+                for r in rows
+            )
             txt = f"📥 <b>Oxirgi 10 lid</b>\n\n{body}"
         await cb.message.edit_text(txt, reply_markup=back_kb())
         await cb.answer()
@@ -547,11 +553,18 @@ class SubmitPayload(BaseModel):
 @app.post("/api/submit")
 async def api_submit(p: SubmitPayload):
     async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
+        cur = await db.execute(
             "INSERT INTO leads(name,surname,phone,percent,answers) VALUES(?,?,?,?,?)",
             (p.name, p.surname, p.phone, p.percent, json.dumps(p.answers, ensure_ascii=False)),
         )
+        lead_id = cur.lastrowid
         await db.commit()
+
+    # Serial: A0001..A9999, B0001..B9999, ... Z9999, then wraps
+    idx = (lead_id - 1) % (26 * 9999)
+    letter = chr(ord("A") + idx // 9999)
+    num = (idx % 9999) + 1
+    serial = f"{letter}{num:04d}"
 
     if bot:
         ans_txt = "\n".join(
@@ -559,7 +572,7 @@ async def api_submit(p: SubmitPayload):
             for a in p.answers
         )
         text = (
-            "🎉 <b>Yangi lid!</b>\n\n"
+            f"🎉 <b>Yangi lid!</b>  <code>#{serial}</code>\n\n"
             f"👤 <b>{p.name} {p.surname}</b>\n"
             f"📞 <code>{p.phone}</code>\n"
             f"🎯 Yutuq: <b>{p.percent}%</b>\n\n"

@@ -229,6 +229,41 @@ function spin() {
 $("#spinBtn").addEventListener("click", spin);
 $("#usePrizeBtn").addEventListener("click", () => showView("view-form"));
 
+// ───────────── Phone mask (+998 default) ─────────────
+const phoneInput = document.querySelector('input[name="phone"]');
+if (phoneInput) {
+  const PREFIX = "+998 ";
+  const formatPhone = (raw) => {
+    let digits = raw.replace(/\D/g, "");
+    if (digits.startsWith("998")) digits = digits.slice(3);
+    digits = digits.slice(0, 9);
+    let out = PREFIX;
+    if (digits.length > 0) out += digits.slice(0, 2);
+    if (digits.length > 2) out += " " + digits.slice(2, 5);
+    if (digits.length > 5) out += " " + digits.slice(5, 7);
+    if (digits.length > 7) out += " " + digits.slice(7, 9);
+    return out;
+  };
+  phoneInput.addEventListener("input", (e) => {
+    e.target.value = formatPhone(e.target.value);
+  });
+  phoneInput.addEventListener("focus", (e) => {
+    if (!e.target.value.startsWith(PREFIX)) e.target.value = PREFIX;
+    setTimeout(() => {
+      const len = e.target.value.length;
+      e.target.setSelectionRange(len, len);
+    }, 0);
+  });
+  phoneInput.addEventListener("keydown", (e) => {
+    // prevent deleting the +998 prefix
+    if ((e.key === "Backspace" || e.key === "Delete") &&
+        e.target.selectionStart <= PREFIX.length &&
+        e.target.selectionEnd <= PREFIX.length) {
+      e.preventDefault();
+    }
+  });
+}
+
 // ───────────── Form ─────────────
 $("#leadForm").addEventListener("submit", async (e) => {
   e.preventDefault();

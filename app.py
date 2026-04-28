@@ -64,6 +64,7 @@ async def init_db():
         CREATE TABLE IF NOT EXISTS zigzag(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             position INTEGER NOT NULL DEFAULT 0,
+            title TEXT NOT NULL DEFAULT '',
             text TEXT NOT NULL DEFAULT '',
             image TEXT
         );
@@ -81,6 +82,12 @@ async def init_db():
         );
         """)
         await db.commit()
+        # migration: add title to zigzag if missing
+        try:
+            await db.execute("ALTER TABLE zigzag ADD COLUMN title TEXT NOT NULL DEFAULT ''")
+            await db.commit()
+        except Exception:
+            pass
         # seed defaults
         defaults = {
             "profile_name": "Premium Quiz",
@@ -141,11 +148,11 @@ async def init_db():
 async def get_zigzag():
     async with aiosqlite.connect(DB_PATH) as db:
         cur = await db.execute(
-            "SELECT id,text,image FROM zigzag ORDER BY position ASC, id ASC"
+            "SELECT id,title,text,image FROM zigzag ORDER BY position ASC, id ASC"
         )
         rows = await cur.fetchall()
     return [
-        {"id": r[0], "text": r[1] or "", "image": r[2] or ""}
+        {"id": r[0], "title": r[1] or "", "text": r[2] or "", "image": r[3] or ""}
         for r in rows
     ]
 
@@ -180,13 +187,13 @@ async def delete_step(sid: int):
         await db.commit()
 
 
-async def add_zigzag(text: str, image: str = "") -> int:
+async def add_zigzag(title: str, text: str, image: str = "") -> int:
     async with aiosqlite.connect(DB_PATH) as db:
         cur = await db.execute("SELECT COALESCE(MAX(position), -1) FROM zigzag")
         (mx,) = await cur.fetchone()
         cur = await db.execute(
-            "INSERT INTO zigzag(position,text,image) VALUES(?,?,?)",
-            (mx + 1, text, image),
+            "INSERT INTO zigzag(position,title,text,image) VALUES(?,?,?,?)",
+            (mx + 1, title, text, image),
         )
         await db.commit()
         return cur.lastrowid
@@ -267,6 +274,7 @@ class AddStep(StatesGroup):
 
 
 class AddZig(StatesGroup):
+    title = State()
     text = State()
     image = State()
 
@@ -616,7 +624,7 @@ def build_dispatcher() -> Dispatcher:
             kb = await steps_menu_kb_local()
             await cb.message.edit_text("✅ Xabar qo'shildi", reply_markup=kb)
         elif cur_state == AddZig.image.state:
-            await add_zigzag(data.get("text", ""), "")
+            await add_zigzag(data.get("title", ""), data.get("text", ""), "")
             await state.clear()
             kb = await zig_menu_kb_local()
             await cb.message.edit_text("✅ Zigzag qatori qo'shildi (rasmsiz)", reply_markup=kb)
@@ -656,9 +664,9 @@ def build_dispatcher() -> Dispatcher:
 
     @dp.callback_query(F.data == "z:add")
     async def cb_z_add(cb: CallbackQuery, state: FSMContext):
-        await state.set_state(AddZig.text)
+        await state.set_state(AddZig.title)
         await cb.message.edit_text(
-            "➕ <b>Yangi zigzag qatori</b>\n\n1-qadam: matnni yuboring.",
+            "➕ <b>Yangi zigzag qatori</b>\n\n1-qadam: <b>sarlavha</b>ni yuboring (qalin matn).",
             reply_markup=back_kb("z"),
         )
         await cb.answer()
@@ -677,7 +685,8 @@ def build_dispatcher() -> Dispatcher:
         if not z:
             return await cb.answer("Topilmadi", show_alert=True)
         empty = "(bo'sh)"
-        info = f"<b>#{z['id']}</b>\n\n{z['text'] or empty}\n"
+        title_line = f"📌 <b>{z['title']}</b>\n" if z.get("title") else ""
+        info = f"<b>#{z['id']}</b>\n\n{title_line}{z['text'] or empty}\n"
         if z["image"]:
             info += f"\n🖼 Rasm: <code>{z['image']}</code>"
         await cb.message.edit_text(info, reply_markup=zig_view_kb(zid))
@@ -696,6 +705,17 @@ def build_dispatcher() -> Dispatcher:
         [InlineKeyboardButton(text="◀️ Bekor qilish", callback_data="nav:z")],
     ])
 
+    @dp.message(AddZig.title, F.text)
+    async def addzig_title(m: Message, state: FSMContext):
+        if not is_admin(m.from_user.id):
+            return
+        await state.update_data(title=m.text.strip())
+        await state.set_state(AddZig.text)
+        await m.answer(
+            "2-qadam: <b>matn</b>ni yuboring (sarlavha ostidagi tafsilot).",
+            reply_markup=back_kb("z"),
+        )
+
     @dp.message(AddZig.text, F.text)
     async def addzig_text(m: Message, state: FSMContext):
         if not is_admin(m.from_user.id):
@@ -703,7 +723,7 @@ def build_dispatcher() -> Dispatcher:
         await state.update_data(text=m.text.strip())
         await state.set_state(AddZig.image)
         await m.answer(
-            "2-qadam: <b>rasm</b> yuboring (photo) yoki rasmsiz qo'shing.",
+            "3-qadam: <b>rasm</b> yuboring (photo) yoki rasmsiz qo'shing.",
             reply_markup=ZIG_SKIP_KB,
         )
 
@@ -716,7 +736,7 @@ def build_dispatcher() -> Dispatcher:
         out = UPLOAD_DIR / f"zig_{photo.file_unique_id}.jpg"
         await m.bot.download_file(file.file_path, destination=out)
         data = await state.get_data()
-        await add_zigzag(data.get("text", ""), f"/static/uploads/{out.name}")
+        await add_zigzag(data.get("title", ""), data.get("text", ""), f"/static/uploads/{out.name}")
         await state.clear()
         kb = await zig_menu_kb_local()
         await m.answer("✅ Zigzag qatori qo'shildi", reply_markup=kb)

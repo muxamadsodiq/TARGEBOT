@@ -50,6 +50,16 @@ function renderZigzag(items) {
   }
   root.style.display = "";
   items.forEach((z, i) => {
+    const block = document.createElement("div");
+    block.className = "zig-block";
+
+    if (z.title) {
+      const h = document.createElement("h3");
+      h.className = "zig-title";
+      h.textContent = z.title;
+      block.appendChild(h);
+    }
+
     const row = document.createElement("div");
     row.className = "zig-row glass" + (i % 2 === 1 ? " reverse" : "");
     const txt = document.createElement("div");
@@ -67,7 +77,8 @@ function renderZigzag(items) {
     }
     row.appendChild(txt);
     row.appendChild(img);
-    root.appendChild(row);
+    block.appendChild(row);
+    root.appendChild(block);
   });
 }
 

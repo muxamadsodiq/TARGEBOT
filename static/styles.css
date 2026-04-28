@@ -230,8 +230,24 @@ input{font:inherit}
 .zigzag-list{
   display:flex;
   flex-direction:column;
-  gap:18px;
+  gap:34px;
   width:100%;
+}
+.zig-block{ display:flex; flex-direction:column; gap:14px; }
+.zig-title{
+  margin:0;
+  padding:0 4px;
+  font-size:24px;
+  font-weight:800;
+  letter-spacing:-0.02em;
+  background: linear-gradient(135deg,#fff 0%, #b9c1ff 100%);
+  -webkit-background-clip:text;
+  background-clip:text;
+  color:transparent;
+  text-shadow: 0 2px 30px rgba(140,150,255,.25);
+}
+@media (min-width: 720px){
+  .zig-title{ font-size:28px; }
 }
 .zig-row{
   display:grid;

@@ -379,17 +379,14 @@ class EditField(StatesGroup):
 
 def main_menu_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="👤 Ismni o'zgartirish", callback_data="set:name"),
-         InlineKeyboardButton(text="📝 Subtitle", callback_data="set:subtitle")],
-        [InlineKeyboardButton(text="🖼 Profil rasmi", callback_data="set:photo"),
+        [InlineKeyboardButton(text="🏷 Sarlavha", callback_data="set:name"),
          InlineKeyboardButton(text="🎯 Yutuq foizi", callback_data="set:percent")],
-        [InlineKeyboardButton(text="💬 Xabarlar", callback_data="s:menu"),
-         InlineKeyboardButton(text="🔀 Zigzag", callback_data="z:menu")],
-        [InlineKeyboardButton(text="🎙 Ovozlik", callback_data="v:menu"),
-         InlineKeyboardButton(text="⭐ Otzivlar", callback_data="r:menu")],
-        [InlineKeyboardButton(text="📋 Guruhlar", callback_data="g:list"),
-         InlineKeyboardButton(text="📊 Holat", callback_data="status")],
-        [InlineKeyboardButton(text="📥 Lidlar", callback_data="leads")],
+        [InlineKeyboardButton(text="🔀 Zigzag", callback_data="z:menu"),
+         InlineKeyboardButton(text="🎙 Ovozlik", callback_data="v:menu")],
+        [InlineKeyboardButton(text="⭐ Otzivlar", callback_data="r:menu"),
+         InlineKeyboardButton(text="📋 Guruhlar", callback_data="g:list")],
+        [InlineKeyboardButton(text="📊 Holat", callback_data="status"),
+         InlineKeyboardButton(text="📥 Lidlar", callback_data="leads")],
     ])
 
 
@@ -507,7 +504,7 @@ def build_dispatcher() -> Dispatcher:
 
     # ───── set:name / subtitle / photo / percent ─────
     PROMPTS = {
-        "name": ("👤 Yangi <b>ismni</b> yuboring:", "profile_name"),
+        "name": ("🏷 Yangi <b>sarlavha</b>ni yuboring (qisqa, 4-6 so'z):", "profile_name"),
         "subtitle": ("📝 Yangi <b>subtitle</b> matnini yuboring (masalan: <i>online</i>):", "welcome_subtitle"),
     }
 

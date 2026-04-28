@@ -16,29 +16,11 @@ async function boot() {
   } catch (e) {
     state.config = { name: "Quiz", subtitle: "online", photo: "", win_percent: 75, steps: [] };
   }
-  $("#profileName").textContent = state.config.name || "Quiz";
-  $("#profileSub").textContent = state.config.subtitle || "online";
-  const photo = state.config.photo || "/static/default-avatar.svg";
-  $("#profilePhoto").src = photo;
-  $("#profilePhoto").onerror = () => {
-    $("#profilePhoto").src =
-      "data:image/svg+xml;utf8," +
-      encodeURIComponent(
-        `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><defs><linearGradient id='g' x1='0' x2='1' y1='0' y2='1'><stop offset='0' stop-color='%23ff5be4'/><stop offset='1' stop-color='%237c3aff'/></linearGradient></defs><rect width='64' height='64' fill='url(%23g)'/><text x='50%' y='54%' text-anchor='middle' fill='white' font-size='28' font-family='Arial' font-weight='700'>${(state.config.name||'Q')[0]}</text></svg>`
-      );
-  };
+  $("#heroTitle").textContent = state.config.name || "Premium";
 
   renderZigzag(state.config.zigzag || []);
   renderVoices(state.config.voices || []);
   renderReviews(state.config.reviews || []);
-
-  const steps = state.config.steps || [];
-  if (steps.length === 0) {
-    addBotBubble("⚠️ Hozircha xabarlar yo'q. Admin botdan xabar qo'shing.");
-    showResultButton();
-    return;
-  }
-  setTimeout(() => playStep(), 600);
 }
 
 // ───────────── Zigzag render ─────────────

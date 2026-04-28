@@ -246,6 +246,7 @@ input{font:inherit}
   color:transparent;
   text-shadow: 0 2px 30px rgba(140,150,255,.25);
 }
+.zig-body{ margin:0; }
 @media (min-width: 720px){
   .zig-title{ font-size:28px; }
 }
@@ -264,6 +265,9 @@ input{font:inherit}
 .zig-row.reverse .zig-text{ order:2; }
 .zig-row.reverse .zig-img{ order:1; }
 .zig-text{
+  display:flex;
+  flex-direction:column;
+  gap:10px;
   color:#f4f5ff;
   font-size:15px;
   line-height:1.55;
@@ -294,11 +298,148 @@ input{font:inherit}
   from{ opacity:0; transform: translateY(14px); }
   to  { opacity:1; transform: translateY(0); }
 }
-@media (max-width: 480px){
+@media (max-width: 720px){
   .zig-row, .zig-row.reverse{
-    grid-template-columns: 1fr;
+    grid-template-columns: 1fr 44%;
+    gap: 10px;
   }
+  .zig-img{ aspect-ratio: 1/1; max-height: none; }
+  .zig-title{ font-size: 18px; }
+  .zig-text{ font-size: 13.5px; }
+  .zig-row.reverse .zig-text{ order:2; }
+  .zig-row.reverse .zig-img{ order:1; }
+}
+@media (max-width: 380px){
+  .zig-row, .zig-row.reverse{ grid-template-columns: 1fr; }
   .zig-row.reverse .zig-text{ order:1; }
   .zig-row.reverse .zig-img{ order:2; }
-  .zig-img{ aspect-ratio: 16/10; }
+  .zig-img{ aspect-ratio: 16/10; max-height: 220px; }
 }
+
+/* ───── Reviews ───── */
+#view-reviews{ margin: 14px 0 4px; }
+.reviews-title{
+  font-size: 22px; font-weight: 800; margin: 0 0 14px; text-align:center;
+  background: linear-gradient(90deg,#ff5be4,#7c3aff,#39d4ff);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+  letter-spacing: .3px;
+}
+.reviews-list{
+  display:grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 14px;
+}
+.review-card{
+  padding: 14px; border-radius: 18px;
+  background: rgba(255,255,255,.06);
+  border: 1px solid rgba(255,255,255,.10);
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  box-shadow: 0 6px 24px rgba(0,0,0,.25);
+  display:flex; flex-direction:column; gap:10px;
+}
+.review-head{ display:flex; align-items:center; gap:12px; }
+.review-avatar{
+  width:46px; height:46px; border-radius:50%;
+  background: linear-gradient(135deg,#ff5be4,#7c3aff);
+  color:#fff; font-weight:700; display:flex; align-items:center; justify-content:center;
+  overflow:hidden; flex:0 0 auto;
+}
+.review-avatar img{ width:100%; height:100%; object-fit:cover; display:block; }
+.review-meta{ display:flex; flex-direction:column; min-width:0; }
+.review-name{ font-weight:700; font-size:15px; color:#fff; }
+.review-stars{ color:#ffce3a; font-size:13px; letter-spacing:1px; }
+.review-text{ margin:0; color:rgba(255,255,255,.85); font-size:14px; line-height:1.5; }
+@media (max-width: 520px){
+  .reviews-list{ grid-template-columns: 1fr; }
+}
+
+/* ─── Voices block (Telegram-style audio cards) ─── */
+#view-voices{ padding:0; background:transparent; box-shadow:none; }
+.voices-list{
+  display:flex; flex-direction:column; gap:14px;
+  padding: 4px 0 8px;
+}
+.voice-card{
+  position:relative;
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: linear-gradient(135deg, rgba(255,255,255,.10), rgba(255,255,255,.04));
+  border: 1px solid rgba(255,255,255,.14);
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  box-shadow: 0 8px 28px rgba(0,0,0,.25);
+  animation: zigIn .5s ease both;
+}
+.voice-title{
+  font-weight:700; font-size:15px; color:#e8ecff;
+  margin-bottom:10px; letter-spacing:.2px;
+}
+.voice-row{ display:flex; align-items:center; gap:14px; }
+.voice-play{
+  flex:0 0 auto;
+  width:48px; height:48px; border-radius:50%;
+  border:none; cursor:pointer;
+  background: linear-gradient(135deg,#7aa2ff,#b07cff);
+  color:#fff;
+  display:flex; align-items:center; justify-content:center;
+  box-shadow: 0 6px 18px rgba(122,162,255,.45);
+  transition: transform .15s ease;
+}
+.voice-play:hover{ transform: scale(1.06); }
+.voice-play:active{ transform: scale(.96); }
+.voice-mid{ flex:1; min-width:0; display:flex; flex-direction:column; gap:6px; }
+.voice-wave{
+  position:relative;
+  display:flex; align-items:center; gap:3px;
+  height:32px;
+  overflow:hidden; border-radius:8px;
+}
+.voice-wave > span{
+  flex:1;
+  min-width:2px;
+  height: var(--h, 50%);
+  background: rgba(255,255,255,.28);
+  border-radius:2px;
+}
+.voice-progress{
+  position:absolute; top:0; left:0; bottom:0;
+  width:0%;
+  background: linear-gradient(90deg, rgba(122,162,255,.55), rgba(176,124,255,.55));
+  pointer-events:none;
+  border-radius:8px;
+  transition: width .1s linear;
+  mix-blend-mode: overlay;
+}
+.voice-meta{
+  display:flex; justify-content:space-between; align-items:center;
+  font-size:12px; color: rgba(255,255,255,.7);
+}
+.voice-caption{
+  margin-top:10px; padding-top:10px;
+  border-top:1px solid rgba(255,255,255,.08);
+  font-size:14px; line-height:1.5; color:#dde3ff;
+  white-space:pre-wrap; word-wrap:break-word;
+}
+
+@media (max-width: 480px){
+  .voice-card{ padding: 12px 12px; border-radius:16px; }
+  .voice-play{ width:42px; height:42px; }
+  .voice-wave{ height:28px; }
+  .voice-title{ font-size:14px; }
+  .voice-caption{ font-size:13.5px; }
+}
+
+.reviews-tg-btn{
+  margin: 18px auto 6px;
+  display: inline-flex;
+}
+#view-reviews{ text-align:center; }
+#view-reviews .reviews-list{ text-align:left; }
+
+#view-reviews-cta{
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+  text-align: center;
+}
+.reviews-cta-wrap .reviews-tg-btn{ margin: 4px auto; }

@@ -88,6 +88,27 @@ async def init_db():
             await db.commit()
         except Exception:
             pass
+        # reviews table
+        await db.execute("""
+        CREATE TABLE IF NOT EXISTS reviews(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            position INTEGER NOT NULL DEFAULT 0,
+            name TEXT NOT NULL DEFAULT '',
+            text TEXT NOT NULL DEFAULT '',
+            image TEXT,
+            rating INTEGER NOT NULL DEFAULT 5
+        )""")
+        # voices table
+        await db.execute("""
+        CREATE TABLE IF NOT EXISTS voices(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            position INTEGER NOT NULL DEFAULT 0,
+            title TEXT NOT NULL DEFAULT '',
+            caption TEXT NOT NULL DEFAULT '',
+            audio TEXT NOT NULL DEFAULT '',
+            duration INTEGER NOT NULL DEFAULT 0
+        )""")
+        await db.commit()
         # seed defaults
         defaults = {
             "profile_name": "Premium Quiz",
@@ -205,6 +226,66 @@ async def delete_zigzag(zid: int):
         await db.commit()
 
 
+async def get_reviews():
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute(
+            "SELECT id,name,text,image,rating FROM reviews ORDER BY position ASC, id ASC"
+        )
+        rows = await cur.fetchall()
+        return [
+            {"id": r[0], "name": r[1], "text": r[2], "image": r[3] or "", "rating": r[4]}
+            for r in rows
+        ]
+
+
+async def add_review(name: str, text: str, image: str, rating: int) -> int:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute("SELECT COALESCE(MAX(position), -1) FROM reviews")
+        (mx,) = await cur.fetchone()
+        cur = await db.execute(
+            "INSERT INTO reviews(position,name,text,image,rating) VALUES(?,?,?,?,?)",
+            (mx + 1, name, text, image, rating),
+        )
+        await db.commit()
+        return cur.lastrowid
+
+
+async def delete_review(rid: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM reviews WHERE id=?", (rid,))
+        await db.commit()
+
+
+async def get_voices():
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute(
+            "SELECT id,title,caption,audio,duration FROM voices ORDER BY position ASC, id ASC"
+        )
+        rows = await cur.fetchall()
+        return [
+            {"id": r[0], "title": r[1], "caption": r[2], "audio": r[3], "duration": r[4]}
+            for r in rows
+        ]
+
+
+async def add_voice(title: str, caption: str, audio: str, duration: int) -> int:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute("SELECT COALESCE(MAX(position),0)+1 FROM voices")
+        pos = (await cur.fetchone())[0]
+        cur = await db.execute(
+            "INSERT INTO voices(position,title,caption,audio,duration) VALUES(?,?,?,?,?)",
+            (pos, title, caption, audio, duration),
+        )
+        await db.commit()
+        return cur.lastrowid
+
+
+async def delete_voice(vid: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM voices WHERE id=?", (vid,))
+        await db.commit()
+
+
 async def get_setting(key: str, default: str = "") -> str:
     async with aiosqlite.connect(DB_PATH) as db:
         cur = await db.execute("SELECT value FROM settings WHERE key=?", (key,))
@@ -279,6 +360,19 @@ class AddZig(StatesGroup):
     image = State()
 
 
+class AddRev(StatesGroup):
+    name = State()
+    text = State()
+    rating = State()
+    image = State()
+
+
+class AddVoice(StatesGroup):
+    title = State()
+    audio = State()
+    caption = State()
+
+
 class EditField(StatesGroup):
     waiting = State()  # generic: name / subtitle / percent / photo
 
@@ -291,6 +385,8 @@ def main_menu_kb() -> InlineKeyboardMarkup:
          InlineKeyboardButton(text="🎯 Yutuq foizi", callback_data="set:percent")],
         [InlineKeyboardButton(text="💬 Xabarlar", callback_data="s:menu"),
          InlineKeyboardButton(text="🔀 Zigzag", callback_data="z:menu")],
+        [InlineKeyboardButton(text="🎙 Ovozlik", callback_data="v:menu"),
+         InlineKeyboardButton(text="⭐ Otzivlar", callback_data="r:menu")],
         [InlineKeyboardButton(text="📋 Guruhlar", callback_data="g:list"),
          InlineKeyboardButton(text="📊 Holat", callback_data="status")],
         [InlineKeyboardButton(text="📥 Lidlar", callback_data="leads")],
@@ -742,6 +838,288 @@ def build_dispatcher() -> Dispatcher:
         await m.answer("✅ Zigzag qatori qo'shildi", reply_markup=kb)
 
 
+    # ───── Reviews (otzivlar) ─────
+    async def rev_menu_kb_local() -> InlineKeyboardMarkup:
+        revs = await get_reviews()
+        rows = [
+            [InlineKeyboardButton(text="➕ Yangi otziv", callback_data="r:add")],
+        ]
+        for r in revs[:20]:
+            stars = "⭐" * int(r.get("rating") or 0)
+            label = f"#{r['id']} {r['name']} {stars}"[:60]
+            rows.append([
+                InlineKeyboardButton(text=label, callback_data=f"r:view:{r['id']}"),
+            ])
+        rows.append([InlineKeyboardButton(text="◀️ Menyu", callback_data="nav:menu")])
+        return InlineKeyboardMarkup(inline_keyboard=rows)
+
+    @dp.callback_query(F.data == "r:menu")
+    async def cb_r_menu(cb: CallbackQuery, state: FSMContext):
+        await state.clear()
+        kb = await rev_menu_kb_local()
+        await cb.message.edit_text(
+            "⭐ <b>Otzivlar</b>\n\n"
+            "Spin oldida ko'rsatiladi.\n"
+            "Har biri: ism, matn, baho (1–5 yulduz), rasm (ixtiyoriy).",
+            reply_markup=kb,
+        )
+        await cb.answer()
+
+    @dp.callback_query(F.data == "nav:r")
+    async def nav_r(cb: CallbackQuery, state: FSMContext):
+        await state.clear()
+        kb = await rev_menu_kb_local()
+        await cb.message.edit_text("⭐ <b>Otzivlar</b>", reply_markup=kb)
+        await cb.answer()
+
+    @dp.callback_query(F.data == "r:add")
+    async def cb_r_add(cb: CallbackQuery, state: FSMContext):
+        await state.set_state(AddRev.name)
+        await cb.message.edit_text(
+            "➕ <b>Yangi otziv</b>\n\n1-qadam: <b>ism</b> (mijoz ismi).",
+            reply_markup=back_kb("r"),
+        )
+        await cb.answer()
+
+    @dp.message(AddRev.name, F.text)
+    async def addrev_name(m: Message, state: FSMContext):
+        if not is_admin(m.from_user.id):
+            return
+        await state.update_data(name=m.text.strip())
+        await state.set_state(AddRev.text)
+        await m.answer("2-qadam: <b>otziv matni</b>.", reply_markup=back_kb("r"))
+
+    @dp.message(AddRev.text, F.text)
+    async def addrev_text(m: Message, state: FSMContext):
+        if not is_admin(m.from_user.id):
+            return
+        await state.update_data(text=m.text.strip())
+        await state.set_state(AddRev.rating)
+        rkb = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="⭐"*i, callback_data=f"r:rate:{i}") for i in range(1, 6)
+        ]])
+        await m.answer("3-qadam: <b>baho</b> tanlang:", reply_markup=rkb)
+
+    @dp.callback_query(F.data.startswith("r:rate:"))
+    async def cb_r_rate(cb: CallbackQuery, state: FSMContext):
+        rating = int(cb.data.split(":")[2])
+        await state.update_data(rating=rating)
+        await state.set_state(AddRev.image)
+        skb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⏭ Rasmsiz qo'shish", callback_data="r:skip")],
+            [InlineKeyboardButton(text="◀️ Bekor qilish", callback_data="nav:r")],
+        ])
+        await cb.message.edit_text(
+            f"4-qadam: <b>rasm</b> yuboring (photo) yoki rasmsiz qo'shing.\nBaho: {'⭐'*rating}",
+            reply_markup=skb,
+        )
+        await cb.answer()
+
+    @dp.message(AddRev.image, F.photo)
+    async def addrev_image(m: Message, state: FSMContext):
+        if not is_admin(m.from_user.id):
+            return
+        photo = m.photo[-1]
+        file = await m.bot.get_file(photo.file_id)
+        out = UPLOAD_DIR / f"rev_{photo.file_unique_id}.jpg"
+        await m.bot.download_file(file.file_path, destination=out)
+        data = await state.get_data()
+        await add_review(
+            data.get("name", ""),
+            data.get("text", ""),
+            f"/static/uploads/{out.name}",
+            int(data.get("rating", 5)),
+        )
+        await state.clear()
+        kb = await rev_menu_kb_local()
+        await m.answer("✅ Otziv qo'shildi", reply_markup=kb)
+
+    @dp.callback_query(F.data == "r:skip")
+    async def cb_r_skip(cb: CallbackQuery, state: FSMContext):
+        cur = await state.get_state()
+        if cur != AddRev.image.state:
+            return await cb.answer()
+        data = await state.get_data()
+        await add_review(
+            data.get("name", ""),
+            data.get("text", ""),
+            "",
+            int(data.get("rating", 5)),
+        )
+        await state.clear()
+        kb = await rev_menu_kb_local()
+        await cb.message.edit_text("✅ Otziv qo'shildi (rasmsiz)", reply_markup=kb)
+        await cb.answer()
+
+    def rev_view_kb(rid: int) -> InlineKeyboardMarkup:
+        return InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🗑 O'chirish", callback_data=f"r:del:{rid}")],
+            [InlineKeyboardButton(text="◀️ Ro'yxat", callback_data="r:menu")],
+        ])
+
+    @dp.callback_query(F.data.startswith("r:view:"))
+    async def cb_r_view(cb: CallbackQuery):
+        rid = int(cb.data.split(":")[2])
+        revs = await get_reviews()
+        r = next((x for x in revs if x["id"] == rid), None)
+        if not r:
+            return await cb.answer("Topilmadi", show_alert=True)
+        stars = "⭐" * int(r.get("rating") or 0)
+        info = f"<b>#{r['id']}</b> — {r['name']}\n{stars}\n\n{r['text']}"
+        await cb.message.edit_text(info, reply_markup=rev_view_kb(rid))
+        await cb.answer()
+
+    @dp.callback_query(F.data.startswith("r:del:"))
+    async def cb_r_del(cb: CallbackQuery):
+        rid = int(cb.data.split(":")[2])
+        await delete_review(rid)
+        await cb.answer("🗑 O'chirildi")
+        kb = await rev_menu_kb_local()
+        await cb.message.edit_text("⭐ <b>Otzivlar</b>", reply_markup=kb)
+
+
+    # ───── Voices (ovozli xabarlar) ─────
+    async def voice_menu_kb_local() -> InlineKeyboardMarkup:
+        vs = await get_voices()
+        rows = [[InlineKeyboardButton(text="➕ Yangi ovoz", callback_data="v:add")]]
+        for v in vs[:20]:
+            label = f"#{v['id']} {v.get('title') or '(sarlavhasiz)'}"[:60]
+            rows.append([InlineKeyboardButton(text=label, callback_data=f"v:view:{v['id']}")])
+        rows.append([InlineKeyboardButton(text="◀️ Menyu", callback_data="nav:menu")])
+        return InlineKeyboardMarkup(inline_keyboard=rows)
+
+    @dp.callback_query(F.data == "v:menu")
+    async def cb_v_menu(cb: CallbackQuery, state: FSMContext):
+        await state.clear()
+        kb = await voice_menu_kb_local()
+        await cb.message.edit_text(
+            "🎙 <b>Ovozli xabarlar</b>\n\n"
+            "Zigzag ostida ko'rsatiladi.\n"
+            "Har biri: sarlavha + ovoz (voice/audio) + caption (ixtiyoriy).",
+            reply_markup=kb,
+        )
+        await cb.answer()
+
+    @dp.callback_query(F.data == "nav:v")
+    async def nav_v(cb: CallbackQuery, state: FSMContext):
+        await state.clear()
+        kb = await voice_menu_kb_local()
+        await cb.message.edit_text("🎙 <b>Ovozli xabarlar</b>", reply_markup=kb)
+        await cb.answer()
+
+    @dp.callback_query(F.data == "v:add")
+    async def cb_v_add(cb: CallbackQuery, state: FSMContext):
+        await state.set_state(AddVoice.title)
+        await cb.message.edit_text(
+            "➕ <b>Yangi ovoz</b>\n\n1-qadam: <b>sarlavha</b> yuboring (yoki '-' belgisi sarlavhasiz uchun).",
+            reply_markup=back_kb("v"),
+        )
+        await cb.answer()
+
+    @dp.message(AddVoice.title, F.text)
+    async def addvoice_title(m: Message, state: FSMContext):
+        if not is_admin(m.from_user.id):
+            return
+        title = m.text.strip()
+        if title == "-":
+            title = ""
+        await state.update_data(title=title)
+        await state.set_state(AddVoice.audio)
+        await m.answer(
+            "2-qadam: <b>ovoz</b> yuboring (voice yoki audio fayl: mp3/ogg/m4a).",
+            reply_markup=back_kb("v"),
+        )
+
+    async def _save_voice_file(m: Message, state: FSMContext, file_id: str, ext: str, duration: int):
+        file = await m.bot.get_file(file_id)
+        out = UPLOAD_DIR / f"voice_{file.file_unique_id if hasattr(file,'file_unique_id') else file_id[-12:]}.{ext}"
+        await m.bot.download_file(file.file_path, destination=out)
+        await state.update_data(audio=f"/static/uploads/{out.name}", duration=int(duration or 0))
+        await state.set_state(AddVoice.caption)
+        ckb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⏭ Captionsiz qo'shish", callback_data="v:skip")],
+            [InlineKeyboardButton(text="◀️ Bekor qilish", callback_data="nav:v")],
+        ])
+        await m.answer("3-qadam: <b>caption</b> (ostidagi yozuv) yuboring yoki o'tkazib yuboring.", reply_markup=ckb)
+
+    @dp.message(AddVoice.audio, F.voice)
+    async def addvoice_voice(m: Message, state: FSMContext):
+        if not is_admin(m.from_user.id):
+            return
+        await _save_voice_file(m, state, m.voice.file_id, "ogg", m.voice.duration)
+
+    @dp.message(AddVoice.audio, F.audio)
+    async def addvoice_audio(m: Message, state: FSMContext):
+        if not is_admin(m.from_user.id):
+            return
+        ext = "mp3"
+        if m.audio.mime_type:
+            mt = m.audio.mime_type.lower()
+            if "ogg" in mt: ext = "ogg"
+            elif "mp4" in mt or "m4a" in mt or "aac" in mt: ext = "m4a"
+            elif "wav" in mt: ext = "wav"
+        await _save_voice_file(m, state, m.audio.file_id, ext, m.audio.duration)
+
+    async def _finalize_voice(state: FSMContext, caption: str):
+        data = await state.get_data()
+        await add_voice(
+            data.get("title", ""),
+            caption,
+            data.get("audio", ""),
+            int(data.get("duration", 0)),
+        )
+        await state.clear()
+
+    @dp.message(AddVoice.caption, F.text)
+    async def addvoice_caption(m: Message, state: FSMContext):
+        if not is_admin(m.from_user.id):
+            return
+        await _finalize_voice(state, m.text.strip())
+        kb = await voice_menu_kb_local()
+        await m.answer("✅ Ovoz qo'shildi", reply_markup=kb)
+
+    @dp.callback_query(F.data == "v:skip")
+    async def cb_v_skip(cb: CallbackQuery, state: FSMContext):
+        cur = await state.get_state()
+        if cur != AddVoice.caption.state:
+            return await cb.answer()
+        await _finalize_voice(state, "")
+        kb = await voice_menu_kb_local()
+        await cb.message.edit_text("✅ Ovoz qo'shildi (captionsiz)", reply_markup=kb)
+        await cb.answer()
+
+    def voice_view_kb(vid: int) -> InlineKeyboardMarkup:
+        return InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🗑 O'chirish", callback_data=f"v:del:{vid}")],
+            [InlineKeyboardButton(text="◀️ Ro'yxat", callback_data="v:menu")],
+        ])
+
+    @dp.callback_query(F.data.startswith("v:view:"))
+    async def cb_v_view(cb: CallbackQuery):
+        vid = int(cb.data.split(":")[2])
+        vs = await get_voices()
+        v = next((x for x in vs if x["id"] == vid), None)
+        if not v:
+            return await cb.answer("Topilmadi", show_alert=True)
+        info = (
+            f"<b>#{v['id']}</b>\n"
+            f"📌 {v.get('title') or '(sarlavhasiz)'}\n"
+            f"⏱ {v.get('duration', 0)}s\n"
+            f"🔗 {v.get('audio') or '—'}\n\n"
+            f"💬 {v.get('caption') or '(captionsiz)'}"
+        )
+        await cb.message.edit_text(info, reply_markup=voice_view_kb(vid))
+        await cb.answer()
+
+    @dp.callback_query(F.data.startswith("v:del:"))
+    async def cb_v_del(cb: CallbackQuery):
+        vid = int(cb.data.split(":")[2])
+        await delete_voice(vid)
+        await cb.answer("🗑 O'chirildi")
+        kb = await voice_menu_kb_local()
+        await cb.message.edit_text("🎙 <b>Ovozli xabarlar</b>", reply_markup=kb)
+
+
     # ───── Questions ─────
     @dp.callback_query(F.data == "q:menu")
     async def cb_q_menu(cb: CallbackQuery, state: FSMContext):
@@ -924,6 +1302,8 @@ async def api_config():
         "win_percent": int(await get_setting("win_percent", "75")),
         "steps": await get_steps(),
         "zigzag": await get_zigzag(),
+        "voices": await get_voices(),
+        "reviews": await get_reviews(),
         "questions": await get_questions(),
     }
 

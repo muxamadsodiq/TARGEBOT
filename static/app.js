@@ -29,6 +29,8 @@ async function boot() {
   };
 
   renderZigzag(state.config.zigzag || []);
+  renderVoices(state.config.voices || []);
+  renderReviews(state.config.reviews || []);
 
   const steps = state.config.steps || [];
   if (steps.length === 0) {
@@ -50,21 +52,22 @@ function renderZigzag(items) {
   }
   root.style.display = "";
   items.forEach((z, i) => {
-    const block = document.createElement("div");
-    block.className = "zig-block";
+    const row = document.createElement("div");
+    row.className = "zig-row glass" + (i % 2 === 1 ? " reverse" : "");
 
+    const txt = document.createElement("div");
+    txt.className = "zig-text";
     if (z.title) {
       const h = document.createElement("h3");
       h.className = "zig-title";
       h.textContent = z.title;
-      block.appendChild(h);
+      txt.appendChild(h);
     }
+    const p = document.createElement("p");
+    p.className = "zig-body";
+    p.textContent = z.text || "";
+    txt.appendChild(p);
 
-    const row = document.createElement("div");
-    row.className = "zig-row glass" + (i % 2 === 1 ? " reverse" : "");
-    const txt = document.createElement("div");
-    txt.className = "zig-text";
-    txt.textContent = z.text || "";
     const img = document.createElement("div");
     img.className = "zig-img";
     if (z.image) {
@@ -77,8 +80,126 @@ function renderZigzag(items) {
     }
     row.appendChild(txt);
     row.appendChild(img);
-    block.appendChild(row);
-    root.appendChild(block);
+    root.appendChild(row);
+  });
+}
+
+// ───────────── Voices render ─────────────
+function fmtTime(s){
+  s = Math.max(0, Math.floor(s||0));
+  const m = Math.floor(s/60), r = s%60;
+  return `${m}:${String(r).padStart(2,'0')}`;
+}
+function renderVoices(items){
+  const root = document.getElementById("voicesList");
+  const sec = document.getElementById("view-voices");
+  if (!root || !sec) return;
+  root.innerHTML = "";
+  if (!items || !items.length){ sec.style.display = "none"; return; }
+  sec.style.display = "";
+  items.forEach((v) => {
+    const card = document.createElement("div");
+    card.className = "voice-card glass";
+    const title = v.title ? `<div class="voice-title">${escapeHtml(v.title)}</div>` : "";
+    const dur = v.duration ? fmtTime(v.duration) : "";
+    const cap = v.caption ? `<div class="voice-caption">${escapeHtml(v.caption)}</div>` : "";
+    card.innerHTML = `
+      ${title}
+      <div class="voice-row">
+        <button class="voice-play" aria-label="Play" type="button">
+          <svg class="ic-play" viewBox="0 0 24 24" width="22" height="22"><path d="M8 5v14l11-7z" fill="currentColor"/></svg>
+          <svg class="ic-pause" viewBox="0 0 24 24" width="22" height="22" style="display:none"><path d="M6 5h4v14H6zM14 5h4v14h-4z" fill="currentColor"/></svg>
+        </button>
+        <div class="voice-mid">
+          <div class="voice-wave">
+            ${Array.from({length: 28}).map((_,i)=>`<span style="--h:${20+((i*53)%80)}%"></span>`).join("")}
+            <div class="voice-progress"></div>
+          </div>
+          <div class="voice-meta">
+            <span class="voice-time">${dur || "0:00"}</span>
+          </div>
+        </div>
+      </div>
+      ${cap}
+      <audio preload="none" src="${v.audio}"></audio>
+    `;
+    const audio = card.querySelector("audio");
+    const btn = card.querySelector(".voice-play");
+    const icPlay = card.querySelector(".ic-play");
+    const icPause = card.querySelector(".ic-pause");
+    const prog = card.querySelector(".voice-progress");
+    const tEl = card.querySelector(".voice-time");
+    btn.addEventListener("click", () => {
+      // pause others
+      document.querySelectorAll("#voicesList audio").forEach(a => { if (a!==audio) a.pause(); });
+      if (audio.paused) audio.play(); else audio.pause();
+    });
+    audio.addEventListener("play", () => { icPlay.style.display="none"; icPause.style.display=""; });
+    audio.addEventListener("pause", () => { icPlay.style.display=""; icPause.style.display="none"; });
+    audio.addEventListener("ended", () => { prog.style.width="0%"; tEl.textContent = dur || "0:00"; });
+    audio.addEventListener("loadedmetadata", () => {
+      if (!dur && audio.duration) tEl.textContent = fmtTime(audio.duration);
+    });
+    audio.addEventListener("timeupdate", () => {
+      const d = audio.duration || v.duration || 0;
+      if (d) prog.style.width = ((audio.currentTime/d)*100) + "%";
+      tEl.textContent = fmtTime(audio.currentTime) + (d ? " / " + fmtTime(d) : "");
+    });
+    root.appendChild(card);
+  });
+}
+function escapeHtml(s){
+  return String(s||"").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+
+// ───────────── Reviews render ─────────────
+function renderReviews(items) {
+  const root = document.getElementById("reviewsList");
+  const sec = document.getElementById("view-reviews");
+  if (!root || !sec) return;
+  root.innerHTML = "";
+  if (!items.length) {
+    sec.style.display = "none";
+    return;
+  }
+  sec.style.display = "";
+  items.forEach((r) => {
+    const card = document.createElement("div");
+    card.className = "review-card glass";
+
+    const head = document.createElement("div");
+    head.className = "review-head";
+    const ava = document.createElement("div");
+    ava.className = "review-avatar";
+    if (r.image) {
+      const im = document.createElement("img");
+      im.src = r.image;
+      im.alt = "";
+      ava.appendChild(im);
+    } else {
+      ava.textContent = (r.name || "?")[0].toUpperCase();
+    }
+    const meta = document.createElement("div");
+    meta.className = "review-meta";
+    const nm = document.createElement("div");
+    nm.className = "review-name";
+    nm.textContent = r.name || "";
+    const stars = document.createElement("div");
+    stars.className = "review-stars";
+    const rating = Math.max(0, Math.min(5, parseInt(r.rating || 0, 10)));
+    stars.textContent = "★".repeat(rating) + "☆".repeat(5 - rating);
+    meta.appendChild(nm);
+    meta.appendChild(stars);
+    head.appendChild(ava);
+    head.appendChild(meta);
+
+    const body = document.createElement("p");
+    body.className = "review-text";
+    body.textContent = r.text || "";
+
+    card.appendChild(head);
+    card.appendChild(body);
+    root.appendChild(card);
   });
 }
 

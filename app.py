@@ -61,6 +61,12 @@ async def init_db():
             image TEXT,
             audio TEXT
         );
+        CREATE TABLE IF NOT EXISTS zigzag(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            position INTEGER NOT NULL DEFAULT 0,
+            text TEXT NOT NULL DEFAULT '',
+            image TEXT
+        );
         CREATE TABLE IF NOT EXISTS admin_groups(
             chat_id INTEGER PRIMARY KEY,
             title TEXT,
@@ -116,6 +122,32 @@ async def init_db():
                     "INSERT INTO steps(position,text) VALUES(?,?)", (i, t)
                 )
             await db.commit()
+        # seed zigzag if empty
+        cur = await db.execute("SELECT COUNT(*) FROM zigzag")
+        (zn,) = await cur.fetchone()
+        if zn == 0:
+            seed_z = [
+                "Bizning mahsulotlarimiz tabiiy va xavfsiz. Har bir tarkib sinovdan o'tgan.",
+                "Tajribali mutaxassislar jamoasi sizning sog'lig'ingizni qadrlaydi.",
+                "Minglab mamnun mijozlar — siz ham ularning safiga qo'shiling!",
+            ]
+            for i, t in enumerate(seed_z):
+                await db.execute(
+                    "INSERT INTO zigzag(position,text) VALUES(?,?)", (i, t)
+                )
+            await db.commit()
+
+
+async def get_zigzag():
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute(
+            "SELECT id,text,image FROM zigzag ORDER BY position ASC, id ASC"
+        )
+        rows = await cur.fetchall()
+    return [
+        {"id": r[0], "text": r[1] or "", "image": r[2] or ""}
+        for r in rows
+    ]
 
 
 async def get_steps():
@@ -145,6 +177,24 @@ async def add_step(text: str, image: str = "", audio: str = "") -> int:
 async def delete_step(sid: int):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("DELETE FROM steps WHERE id=?", (sid,))
+        await db.commit()
+
+
+async def add_zigzag(text: str, image: str = "") -> int:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute("SELECT COALESCE(MAX(position), -1) FROM zigzag")
+        (mx,) = await cur.fetchone()
+        cur = await db.execute(
+            "INSERT INTO zigzag(position,text,image) VALUES(?,?,?)",
+            (mx + 1, text, image),
+        )
+        await db.commit()
+        return cur.lastrowid
+
+
+async def delete_zigzag(zid: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM zigzag WHERE id=?", (zid,))
         await db.commit()
 
 
@@ -216,6 +266,11 @@ class AddStep(StatesGroup):
     audio = State()
 
 
+class AddZig(StatesGroup):
+    text = State()
+    image = State()
+
+
 class EditField(StatesGroup):
     waiting = State()  # generic: name / subtitle / percent / photo
 
@@ -227,9 +282,10 @@ def main_menu_kb() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="🖼 Profil rasmi", callback_data="set:photo"),
          InlineKeyboardButton(text="🎯 Yutuq foizi", callback_data="set:percent")],
         [InlineKeyboardButton(text="💬 Xabarlar", callback_data="s:menu"),
-         InlineKeyboardButton(text="📋 Guruhlar", callback_data="g:list")],
-        [InlineKeyboardButton(text="📊 Holat", callback_data="status"),
-         InlineKeyboardButton(text="📥 Lidlar", callback_data="leads")],
+         InlineKeyboardButton(text="🔀 Zigzag", callback_data="z:menu")],
+        [InlineKeyboardButton(text="📋 Guruhlar", callback_data="g:list"),
+         InlineKeyboardButton(text="📊 Holat", callback_data="status")],
+        [InlineKeyboardButton(text="📥 Lidlar", callback_data="leads")],
     ])
 
 
@@ -559,10 +615,112 @@ def build_dispatcher() -> Dispatcher:
             await state.clear()
             kb = await steps_menu_kb_local()
             await cb.message.edit_text("✅ Xabar qo'shildi", reply_markup=kb)
+        elif cur_state == AddZig.image.state:
+            await add_zigzag(data.get("text", ""), "")
+            await state.clear()
+            kb = await zig_menu_kb_local()
+            await cb.message.edit_text("✅ Zigzag qatori qo'shildi (rasmsiz)", reply_markup=kb)
         else:
             await cb.answer()
             return
         await cb.answer()
+
+    # ───── Zigzag (text+image rows) ─────
+    async def zig_menu_kb_local() -> InlineKeyboardMarkup:
+        zz = await get_zigzag()
+        rows = [[InlineKeyboardButton(text="➕ Yangi qator qo'shish", callback_data="z:add")]]
+        for z in zz[:20]:
+            label = (z["text"][:35] + "…") if len(z["text"]) > 35 else (z["text"] or "(bo'sh)")
+            rows.append([InlineKeyboardButton(text=f"#{z['id']} {label}", callback_data=f"z:view:{z['id']}")])
+        rows.append([InlineKeyboardButton(text="◀️ Orqaga", callback_data="nav:menu")])
+        return InlineKeyboardMarkup(inline_keyboard=rows)
+
+    @dp.callback_query(F.data == "z:menu")
+    async def cb_z_menu(cb: CallbackQuery, state: FSMContext):
+        await state.clear()
+        kb = await zig_menu_kb_local()
+        await cb.message.edit_text(
+            "🔀 <b>Zigzag bo'limi</b>\n\n"
+            "Chat va g'ildirak orasida ko'rsatiladi.\n"
+            "Har qator: matn + rasm. Tartib avtomatik almashadi (chap/o'ng).",
+            reply_markup=kb,
+        )
+        await cb.answer()
+
+    @dp.callback_query(F.data == "nav:z")
+    async def nav_z(cb: CallbackQuery, state: FSMContext):
+        await state.clear()
+        kb = await zig_menu_kb_local()
+        await cb.message.edit_text("🔀 <b>Zigzag</b>", reply_markup=kb)
+        await cb.answer()
+
+    @dp.callback_query(F.data == "z:add")
+    async def cb_z_add(cb: CallbackQuery, state: FSMContext):
+        await state.set_state(AddZig.text)
+        await cb.message.edit_text(
+            "➕ <b>Yangi zigzag qatori</b>\n\n1-qadam: matnni yuboring.",
+            reply_markup=back_kb("z"),
+        )
+        await cb.answer()
+
+    def zig_view_kb(zid: int) -> InlineKeyboardMarkup:
+        return InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🗑 O'chirish", callback_data=f"z:del:{zid}")],
+            [InlineKeyboardButton(text="◀️ Ro'yxat", callback_data="z:menu")],
+        ])
+
+    @dp.callback_query(F.data.startswith("z:view:"))
+    async def cb_z_view(cb: CallbackQuery):
+        zid = int(cb.data.split(":")[2])
+        zz = await get_zigzag()
+        z = next((x for x in zz if x["id"] == zid), None)
+        if not z:
+            return await cb.answer("Topilmadi", show_alert=True)
+        empty = "(bo'sh)"
+        info = f"<b>#{z['id']}</b>\n\n{z['text'] or empty}\n"
+        if z["image"]:
+            info += f"\n🖼 Rasm: <code>{z['image']}</code>"
+        await cb.message.edit_text(info, reply_markup=zig_view_kb(zid))
+        await cb.answer()
+
+    @dp.callback_query(F.data.startswith("z:del:"))
+    async def cb_z_del(cb: CallbackQuery):
+        zid = int(cb.data.split(":")[2])
+        await delete_zigzag(zid)
+        await cb.answer("🗑 O'chirildi")
+        kb = await zig_menu_kb_local()
+        await cb.message.edit_text("🔀 <b>Zigzag</b>", reply_markup=kb)
+
+    ZIG_SKIP_KB = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⏭ Rasmsiz qo'shish", callback_data="s:skip")],
+        [InlineKeyboardButton(text="◀️ Bekor qilish", callback_data="nav:z")],
+    ])
+
+    @dp.message(AddZig.text, F.text)
+    async def addzig_text(m: Message, state: FSMContext):
+        if not is_admin(m.from_user.id):
+            return
+        await state.update_data(text=m.text.strip())
+        await state.set_state(AddZig.image)
+        await m.answer(
+            "2-qadam: <b>rasm</b> yuboring (photo) yoki rasmsiz qo'shing.",
+            reply_markup=ZIG_SKIP_KB,
+        )
+
+    @dp.message(AddZig.image, F.photo)
+    async def addzig_image(m: Message, state: FSMContext):
+        if not is_admin(m.from_user.id):
+            return
+        photo = m.photo[-1]
+        file = await m.bot.get_file(photo.file_id)
+        out = UPLOAD_DIR / f"zig_{photo.file_unique_id}.jpg"
+        await m.bot.download_file(file.file_path, destination=out)
+        data = await state.get_data()
+        await add_zigzag(data.get("text", ""), f"/static/uploads/{out.name}")
+        await state.clear()
+        kb = await zig_menu_kb_local()
+        await m.answer("✅ Zigzag qatori qo'shildi", reply_markup=kb)
+
 
     # ───── Questions ─────
     @dp.callback_query(F.data == "q:menu")
@@ -745,6 +903,7 @@ async def api_config():
         "photo": await get_setting("profile_photo"),
         "win_percent": int(await get_setting("win_percent", "75")),
         "steps": await get_steps(),
+        "zigzag": await get_zigzag(),
         "questions": await get_questions(),
     }
 

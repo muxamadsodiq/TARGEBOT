@@ -224,3 +224,65 @@ input{font:inherit}
   max-width:88%;
 }
 
+
+/* ─── Zigzag block ─── */
+#view-zigzag{ padding:0; background:transparent; box-shadow:none; }
+.zigzag-list{
+  display:flex;
+  flex-direction:column;
+  gap:18px;
+  width:100%;
+}
+.zig-row{
+  display:grid;
+  grid-template-columns: 1fr 42%;
+  gap:14px;
+  align-items:center;
+  padding:14px;
+  border-radius:20px;
+  animation: zigIn .6s ease both;
+}
+.zig-row.reverse{
+  grid-template-columns: 42% 1fr;
+}
+.zig-row.reverse .zig-text{ order:2; }
+.zig-row.reverse .zig-img{ order:1; }
+.zig-text{
+  color:#f4f5ff;
+  font-size:15px;
+  line-height:1.55;
+  letter-spacing:.2px;
+  white-space:pre-wrap;
+}
+.zig-img{
+  width:100%;
+  aspect-ratio: 1/1;
+  border-radius:16px;
+  overflow:hidden;
+  background:linear-gradient(135deg, rgba(255,91,228,.18), rgba(124,58,255,.18));
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+.zig-img.empty::after{
+  content:"🖼";
+  font-size:36px;
+  opacity:.45;
+}
+.zig-img img{
+  width:100%; height:100%;
+  object-fit:cover;
+  display:block;
+}
+@keyframes zigIn{
+  from{ opacity:0; transform: translateY(14px); }
+  to  { opacity:1; transform: translateY(0); }
+}
+@media (max-width: 480px){
+  .zig-row, .zig-row.reverse{
+    grid-template-columns: 1fr;
+  }
+  .zig-row.reverse .zig-text{ order:1; }
+  .zig-row.reverse .zig-img{ order:2; }
+  .zig-img{ aspect-ratio: 16/10; }
+}

@@ -28,6 +28,8 @@ async function boot() {
       );
   };
 
+  renderZigzag(state.config.zigzag || []);
+
   const steps = state.config.steps || [];
   if (steps.length === 0) {
     addBotBubble("⚠️ Hozircha xabarlar yo'q. Admin botdan xabar qo'shing.");
@@ -35,6 +37,38 @@ async function boot() {
     return;
   }
   setTimeout(() => playStep(), 600);
+}
+
+// ───────────── Zigzag render ─────────────
+function renderZigzag(items) {
+  const root = document.getElementById("zigzagList");
+  if (!root) return;
+  root.innerHTML = "";
+  if (!items.length) {
+    root.style.display = "none";
+    return;
+  }
+  root.style.display = "";
+  items.forEach((z, i) => {
+    const row = document.createElement("div");
+    row.className = "zig-row glass" + (i % 2 === 1 ? " reverse" : "");
+    const txt = document.createElement("div");
+    txt.className = "zig-text";
+    txt.textContent = z.text || "";
+    const img = document.createElement("div");
+    img.className = "zig-img";
+    if (z.image) {
+      const im = document.createElement("img");
+      im.src = z.image;
+      im.alt = "";
+      img.appendChild(im);
+    } else {
+      img.classList.add("empty");
+    }
+    row.appendChild(txt);
+    row.appendChild(img);
+    root.appendChild(row);
+  });
 }
 
 // ───────────── Chat helpers ─────────────

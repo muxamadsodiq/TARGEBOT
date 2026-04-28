@@ -54,6 +54,13 @@ async def init_db():
             text TEXT NOT NULL,
             options TEXT NOT NULL  -- JSON array of 3 strings
         );
+        CREATE TABLE IF NOT EXISTS steps(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            position INTEGER NOT NULL DEFAULT 0,
+            text TEXT NOT NULL DEFAULT '',
+            image TEXT,
+            audio TEXT
+        );
         CREATE TABLE IF NOT EXISTS admin_groups(
             chat_id INTEGER PRIMARY KEY,
             title TEXT,
@@ -94,6 +101,50 @@ async def init_db():
                     "INSERT INTO questions(position,text,options) VALUES(?,?,?)",
                     (i, t, json.dumps(opts, ensure_ascii=False)),
                 )
+        await db.commit()
+        # seed default steps if empty
+        cur = await db.execute("SELECT COUNT(*) FROM steps")
+        (sn,) = await cur.fetchone()
+        if sn == 0:
+            seed_steps = [
+                "Assalomu alaykum! Bu yerda biz haqimizda qisqacha ma'lumot olasiz.",
+                "Biz sifatli mahsulotlar va xizmatlarni eng yaxshi narxlarda taklif qilamiz.",
+                "Pastdagi g'ildirakni aylantirib, shaxsiy chegirmangizni qo'lga kiriting!",
+            ]
+            for i, t in enumerate(seed_steps):
+                await db.execute(
+                    "INSERT INTO steps(position,text) VALUES(?,?)", (i, t)
+                )
+            await db.commit()
+
+
+async def get_steps():
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute(
+            "SELECT id,text,image,audio FROM steps ORDER BY position ASC, id ASC"
+        )
+        rows = await cur.fetchall()
+    return [
+        {"id": r[0], "text": r[1] or "", "image": r[2] or "", "audio": r[3] or ""}
+        for r in rows
+    ]
+
+
+async def add_step(text: str, image: str = "", audio: str = "") -> int:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute("SELECT COALESCE(MAX(position), -1) FROM steps")
+        (mx,) = await cur.fetchone()
+        cur = await db.execute(
+            "INSERT INTO steps(position,text,image,audio) VALUES(?,?,?,?)",
+            (mx + 1, text, image, audio),
+        )
+        await db.commit()
+        return cur.lastrowid
+
+
+async def delete_step(sid: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM steps WHERE id=?", (sid,))
         await db.commit()
 
 
@@ -159,6 +210,12 @@ class AddQ(StatesGroup):
     options = State()
 
 
+class AddStep(StatesGroup):
+    text = State()
+    image = State()
+    audio = State()
+
+
 class EditField(StatesGroup):
     waiting = State()  # generic: name / subtitle / percent / photo
 
@@ -169,7 +226,7 @@ def main_menu_kb() -> InlineKeyboardMarkup:
          InlineKeyboardButton(text="📝 Subtitle", callback_data="set:subtitle")],
         [InlineKeyboardButton(text="🖼 Profil rasmi", callback_data="set:photo"),
          InlineKeyboardButton(text="🎯 Yutuq foizi", callback_data="set:percent")],
-        [InlineKeyboardButton(text="❓ Savollar", callback_data="q:menu"),
+        [InlineKeyboardButton(text="💬 Xabarlar", callback_data="s:menu"),
          InlineKeyboardButton(text="📋 Guruhlar", callback_data="g:list")],
         [InlineKeyboardButton(text="📊 Holat", callback_data="status"),
          InlineKeyboardButton(text="📥 Lidlar", callback_data="leads")],
@@ -281,7 +338,7 @@ def build_dispatcher() -> Dispatcher:
                 idx = (lid - 1) % (26 * 9999)
                 return f"{chr(ord('A') + idx // 9999)}{(idx % 9999) + 1:04d}"
             body = "\n".join(
-                f"<code>#{serial_of(r[0])}</code> {r[1]} — <b>{r[2]} {r[3]}</b> | {r[4]} | {r[5]}%"
+                f"<code>#{serial_of(r[0])}</code> {r[1]} — <b>{r[2]}</b> ({r[3]}) | {r[4]} | {r[5]}%"
                 for r in rows
             )
             txt = f"📥 <b>Oxirgi 10 lid</b>\n\n{body}"
@@ -357,6 +414,155 @@ def build_dispatcher() -> Dispatcher:
         await set_setting(key, m.text.strip())
         await state.clear()
         await m.answer(f"✅ {field} yangilandi", reply_markup=main_menu_kb())
+
+    # ───── Steps (info messages) ─────
+    async def steps_menu_kb_local() -> InlineKeyboardMarkup:
+        ss = await get_steps()
+        rows = [[InlineKeyboardButton(text="➕ Yangi xabar qo'shish", callback_data="s:add")]]
+        for i, s in enumerate(ss[:30]):
+            short = (s["text"] or "(rasm/ovoz)")[:32]
+            tag = ""
+            if s["image"]: tag += " 🖼"
+            if s["audio"]: tag += " 🎤"
+            rows.append([
+                InlineKeyboardButton(
+                    text=f"{i+1}.{tag} {short}",
+                    callback_data=f"s:view:{s['id']}",
+                )
+            ])
+        rows.append([InlineKeyboardButton(text="◀️ Orqaga", callback_data="nav:menu")])
+        return InlineKeyboardMarkup(inline_keyboard=rows)
+
+    @dp.callback_query(F.data == "s:menu")
+    async def cb_s_menu(cb: CallbackQuery, state: FSMContext):
+        await state.clear()
+        kb = await steps_menu_kb_local()
+        await cb.message.edit_text(
+            "💬 <b>Xabarlar (info)</b>\n\n"
+            "Foydalanuvchiga ketma-ket ko'rsatiladigan xabarlar.\n"
+            "Har xabar matn + ixtiyoriy rasm + ixtiyoriy ovoz bo'lishi mumkin.",
+            reply_markup=kb,
+        )
+        await cb.answer()
+
+    @dp.callback_query(F.data == "s:add")
+    async def cb_s_add(cb: CallbackQuery, state: FSMContext):
+        await state.set_state(AddStep.text)
+        await cb.message.edit_text(
+            "➕ <b>Yangi xabar</b>\n\n"
+            "1-qadam: matnni yuboring (yoki <code>-</code> yozsangiz, matnsiz qoladi).",
+            reply_markup=back_kb("s"),
+        )
+        await cb.answer()
+
+    @dp.callback_query(F.data == "nav:s")
+    async def nav_s(cb: CallbackQuery, state: FSMContext):
+        await state.clear()
+        kb = await steps_menu_kb_local()
+        await cb.message.edit_text("💬 <b>Xabarlar</b>", reply_markup=kb)
+        await cb.answer()
+
+    def step_view_kb(sid: int) -> InlineKeyboardMarkup:
+        return InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🗑 O'chirish", callback_data=f"s:del:{sid}")],
+            [InlineKeyboardButton(text="◀️ Ro'yxat", callback_data="s:menu")],
+        ])
+
+    @dp.callback_query(F.data.startswith("s:view:"))
+    async def cb_s_view(cb: CallbackQuery):
+        sid = int(cb.data.split(":")[2])
+        ss = await get_steps()
+        s = next((x for x in ss if x["id"] == sid), None)
+        if not s:
+            return await cb.answer("Topilmadi", show_alert=True)
+        no_text = "(matn yo'q)"
+        info = f"<b>#{s['id']}</b>\n\n{s['text'] or no_text}\n"
+        if s["image"]: info += f"\n🖼 Rasm: <code>{s['image']}</code>"
+        if s["audio"]: info += f"\n🎤 Ovoz: <code>{s['audio']}</code>"
+        await cb.message.edit_text(info, reply_markup=step_view_kb(sid))
+        await cb.answer()
+
+    @dp.callback_query(F.data.startswith("s:del:"))
+    async def cb_s_del(cb: CallbackQuery):
+        sid = int(cb.data.split(":")[2])
+        await delete_step(sid)
+        await cb.answer("🗑 O'chirildi")
+        kb = await steps_menu_kb_local()
+        await cb.message.edit_text("💬 <b>Xabarlar</b>", reply_markup=kb)
+
+    SKIP_KB = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⏭ O'tkazib yuborish", callback_data="s:skip")],
+        [InlineKeyboardButton(text="◀️ Bekor qilish", callback_data="nav:s")],
+    ])
+
+    @dp.message(AddStep.text, F.text)
+    async def addstep_text(m: Message, state: FSMContext):
+        if not is_admin(m.from_user.id):
+            return
+        txt = m.text.strip()
+        if txt == "-":
+            txt = ""
+        await state.update_data(text=txt)
+        await state.set_state(AddStep.image)
+        await m.answer(
+            "2-qadam: <b>rasm</b> yuboring (photo) yoki o'tkazib yuboring.",
+            reply_markup=SKIP_KB,
+        )
+
+    @dp.message(AddStep.image, F.photo)
+    async def addstep_image(m: Message, state: FSMContext):
+        if not is_admin(m.from_user.id):
+            return
+        photo = m.photo[-1]
+        file = await m.bot.get_file(photo.file_id)
+        out = UPLOAD_DIR / f"step_{photo.file_unique_id}.jpg"
+        await m.bot.download_file(file.file_path, destination=out)
+        await state.update_data(image=f"/static/uploads/{out.name}")
+        await state.set_state(AddStep.audio)
+        await m.answer(
+            "3-qadam: <b>ovozli xabar</b> (voice) yuboring yoki o'tkazib yuboring.",
+            reply_markup=SKIP_KB,
+        )
+
+    @dp.message(AddStep.audio, F.voice | F.audio)
+    async def addstep_audio(m: Message, state: FSMContext):
+        if not is_admin(m.from_user.id):
+            return
+        if m.voice:
+            f = m.voice
+            ext = "ogg"
+        else:
+            f = m.audio
+            ext = "mp3"
+        file = await m.bot.get_file(f.file_id)
+        out = UPLOAD_DIR / f"step_audio_{f.file_unique_id}.{ext}"
+        await m.bot.download_file(file.file_path, destination=out)
+        await state.update_data(audio=f"/static/uploads/{out.name}")
+        data = await state.get_data()
+        await add_step(data.get("text", ""), data.get("image", ""), data.get("audio", ""))
+        await state.clear()
+        kb = await steps_menu_kb_local()
+        await m.answer("✅ Xabar qo'shildi", reply_markup=kb)
+
+    @dp.callback_query(F.data == "s:skip")
+    async def cb_s_skip(cb: CallbackQuery, state: FSMContext):
+        cur_state = await state.get_state()
+        data = await state.get_data()
+        if cur_state == AddStep.image.state:
+            await state.set_state(AddStep.audio)
+            await cb.message.edit_text(
+                "3-qadam: <b>ovozli xabar</b> (voice) yuboring yoki o'tkazib yuboring.",
+                reply_markup=SKIP_KB,
+            )
+        elif cur_state == AddStep.audio.state:
+            await add_step(data.get("text", ""), data.get("image", ""), data.get("audio", ""))
+            await state.clear()
+            kb = await steps_menu_kb_local()
+            await cb.message.edit_text("✅ Xabar qo'shildi", reply_markup=kb)
+        else:
+            await cb.answer()
+            return
+        await cb.answer()
 
     # ───── Questions ─────
     @dp.callback_query(F.data == "q:menu")
@@ -538,6 +744,7 @@ async def api_config():
         "subtitle": await get_setting("welcome_subtitle"),
         "photo": await get_setting("profile_photo"),
         "win_percent": int(await get_setting("win_percent", "75")),
+        "steps": await get_steps(),
         "questions": await get_questions(),
     }
 
@@ -547,7 +754,7 @@ class SubmitPayload(BaseModel):
     surname: str
     phone: str
     percent: int
-    answers: list  # [{question, answer}]
+    answers: list = []  # legacy, may be empty
 
 
 @app.post("/api/submit")
@@ -567,16 +774,12 @@ async def api_submit(p: SubmitPayload):
     serial = f"{letter}{num:04d}"
 
     if bot:
-        ans_txt = "\n".join(
-            f"  • {a.get('question','?')} → <b>{a.get('answer','?')}</b>"
-            for a in p.answers
-        )
         text = (
             f"🎉 <b>Yangi lid!</b>  <code>#{serial}</code>\n\n"
-            f"👤 <b>{p.name} {p.surname}</b>\n"
+            f"👤 <b>{p.name}</b>\n"
+            f"📍 Viloyat: <b>{p.surname}</b>\n"
             f"📞 <code>{p.phone}</code>\n"
-            f"🎯 Yutuq: <b>{p.percent}%</b>\n\n"
-            f"📝 Javoblar:\n{ans_txt}"
+            f"🎯 Yutuq: <b>{p.percent}%</b>"
         )
         targets = await list_admin_groups()
         chat_ids = [cid for cid, _ in targets]

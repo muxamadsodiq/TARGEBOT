@@ -1,8 +1,7 @@
 // ───────────── State ─────────────
 const state = {
   config: null,
-  qIndex: 0,
-  answers: [],
+  sIndex: 0,
   prize: 0,
 };
 
@@ -15,7 +14,7 @@ async function boot() {
     const r = await fetch("/api/config");
     state.config = await r.json();
   } catch (e) {
-    state.config = { name: "Quiz", subtitle: "online", photo: "", win_percent: 75, questions: [] };
+    state.config = { name: "Quiz", subtitle: "online", photo: "", win_percent: 75, steps: [] };
   }
   $("#profileName").textContent = state.config.name || "Quiz";
   $("#profileSub").textContent = state.config.subtitle || "online";
@@ -29,11 +28,13 @@ async function boot() {
       );
   };
 
-  if (!state.config.questions || state.config.questions.length === 0) {
-    addBotBubble("⚠️ Hozircha savollar yo'q. Admin botdan savol qo'shing.");
+  const steps = state.config.steps || [];
+  if (steps.length === 0) {
+    addBotBubble("⚠️ Hozircha xabarlar yo'q. Admin botdan xabar qo'shing.");
+    showResultButton();
     return;
   }
-  setTimeout(() => askQuestion(), 600);
+  setTimeout(() => playStep(), 600);
 }
 
 // ───────────── Chat helpers ─────────────
@@ -55,23 +56,39 @@ function scrollChat() {
   body.scrollTop = body.scrollHeight;
 }
 
-function addBotBubble(text) {
+function addBotBubble(text, opts = {}) {
   return new Promise((resolve) => {
     const el = document.createElement("div");
     el.className = "bubble bot";
-    el.innerHTML = '<span class="txt"></span><span class="cursor"></span>';
+    let inner = "";
+    if (opts.image) {
+      inner += `<img class="bub-img" src="${opts.image}" alt="" />`;
+    }
+    if (text) {
+      inner += '<span class="txt"></span><span class="cursor"></span>';
+    }
+    if (opts.audio) {
+      inner += `<audio class="bub-audio" controls preload="metadata" src="${opts.audio}"></audio>`;
+    }
+    el.innerHTML = inner;
     $("#chatBody").appendChild(el);
     scrollChat();
+
+    if (!text) {
+      // no typewriter — just resolve after a short pause
+      setTimeout(() => resolve(el), 500);
+      return;
+    }
     const txtEl = el.querySelector(".txt");
     const curEl = el.querySelector(".cursor");
     let i = 0;
-    const speed = 28;
+    const speed = 26;
     const tick = () => {
       txtEl.textContent = text.slice(0, ++i);
       scrollChat();
       if (i < text.length) setTimeout(tick, speed);
       else {
-        setTimeout(() => curEl.remove(), 400);
+        setTimeout(() => curEl && curEl.remove(), 400);
         resolve(el);
       }
     };
@@ -79,46 +96,20 @@ function addBotBubble(text) {
   });
 }
 
-function addUserBubble(text) {
-  const el = document.createElement("div");
-  el.className = "bubble user send";
-  el.textContent = text;
-  $("#chatBody").appendChild(el);
-  scrollChat();
-}
+// ───────────── Steps flow (auto) ─────────────
+async function playStep() {
+  const steps = state.config.steps || [];
+  if (state.sIndex >= steps.length) return showResultButton();
 
-// ───────────── Quiz flow ─────────────
-async function askQuestion() {
-  const qs = state.config.questions;
-  if (state.qIndex >= qs.length) return showResultButton();
-
-  const q = qs[state.qIndex];
-  $("#optionsBar").innerHTML = "";
-
+  const s = steps[state.sIndex];
   const t = showTyping();
   await new Promise((r) => setTimeout(r, 700));
   removeTyping();
-  await addBotBubble(q.text);
+  await addBotBubble(s.text || "", { image: s.image, audio: s.audio });
 
-  // render options
-  const bar = $("#optionsBar");
-  bar.innerHTML = "";
-  q.options.forEach((opt) => {
-    const b = document.createElement("button");
-    b.className = "opt-btn";
-    b.textContent = opt;
-    b.onclick = () => onAnswer(q, opt);
-    bar.appendChild(b);
-  });
-}
-
-function onAnswer(q, opt) {
-  $$(".opt-btn").forEach((b) => (b.disabled = true));
-  state.answers.push({ question: q.text, answer: opt });
-  addUserBubble(opt);
-  $("#optionsBar").innerHTML = "";
-  state.qIndex++;
-  setTimeout(askQuestion, 500);
+  state.sIndex++;
+  // pause before next step
+  setTimeout(playStep, 1200);
 }
 
 function showResultButton() {
@@ -133,9 +124,13 @@ function showResultButton() {
 
 // ───────────── View switching ─────────────
 function showView(id) {
-  $$(".view").forEach((v) => v.classList.remove("active"));
-  $("#" + id).classList.add("active");
-  window.scrollTo({ top: 0, behavior: "smooth" });
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.classList.remove("locked");
+  el.classList.add("unlock");
+  setTimeout(() => {
+    el.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, 80);
 }
 function goToWheel() {
   showView("view-wheel");
@@ -143,7 +138,7 @@ function goToWheel() {
 }
 
 // ───────────── Wheel ─────────────
-const WHEEL_SLICES = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]; // percent labels
+const WHEEL_SLICES = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100];
 const SLICE_COLORS = [
   "#ff5be4", "#7c3aff", "#3ad6ff", "#ffd84d", "#41d870",
   "#ff8a3a", "#5b8cff", "#ff3aa1", "#9b5bff", "#3affc1",
@@ -171,7 +166,6 @@ function drawWheel(rotation = 0) {
     ctx.lineWidth = 2;
     ctx.stroke();
 
-    // label
     ctx.save();
     ctx.translate(cx, cy);
     ctx.rotate(start + slice / 2);
@@ -183,7 +177,6 @@ function drawWheel(rotation = 0) {
     ctx.fillText(WHEEL_SLICES[i] + "%", r - 14, 6);
     ctx.restore();
   }
-  // outer ring
   ctx.beginPath();
   ctx.arc(cx, cy, r, 0, Math.PI * 2);
   ctx.strokeStyle = "rgba(255,255,255,.3)";
@@ -193,7 +186,6 @@ function drawWheel(rotation = 0) {
 
 function spin() {
   const target = state.config.win_percent ?? 75;
-  // find closest slice
   let idx = 0, best = Infinity;
   WHEEL_SLICES.forEach((v, i) => {
     const d = Math.abs(v - target);
@@ -201,10 +193,7 @@ function spin() {
   });
   const N = WHEEL_SLICES.length;
   const slice = (Math.PI * 2) / N;
-  // pointer is at top (-PI/2). slice center angle from rotation = rotation + idx*slice + slice/2 - PI/2
-  // we want pointer to align with center => rotation + idx*slice + slice/2 - PI/2 = -PI/2 + 2PI*k
-  // => rotation = -idx*slice - slice/2 + 2PI*k
-  const turns = 6; // full spins
+  const turns = 6;
   const finalRot = turns * Math.PI * 2 - idx * slice - slice / 2;
 
   const dur = 5200;
@@ -213,7 +202,6 @@ function spin() {
 
   function frame(t) {
     const p = Math.min(1, (t - t0) / dur);
-    // ease-out cubic
     const eased = 1 - Math.pow(1 - p, 3);
     drawWheel(finalRot * eased);
     if (p < 1) requestAnimationFrame(frame);
@@ -255,7 +243,6 @@ if (phoneInput) {
     }, 0);
   });
   phoneInput.addEventListener("keydown", (e) => {
-    // prevent deleting the +998 prefix
     if ((e.key === "Backspace" || e.key === "Delete") &&
         e.target.selectionStart <= PREFIX.length &&
         e.target.selectionEnd <= PREFIX.length) {
@@ -273,7 +260,7 @@ $("#leadForm").addEventListener("submit", async (e) => {
     surname: fd.get("surname").trim(),
     phone: fd.get("phone").trim(),
     percent: state.prize || (state.config.win_percent ?? 75),
-    answers: state.answers,
+    answers: [],
   };
   const btn = e.target.querySelector("button[type=submit]");
   btn.disabled = true;

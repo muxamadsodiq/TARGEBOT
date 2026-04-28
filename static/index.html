@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <meta name="theme-color" content="#0b1020" />
 <title>Premium Quiz</title>
-<link rel="stylesheet" href="/static/styles.css" />
+<link rel="stylesheet" href="/static/styles.css?v=5" />
 </head>
 <body>
   <div class="bg-orbs">
@@ -16,7 +16,7 @@
 
   <main class="app">
     <!-- ───────── CHAT VIEW ───────── -->
-    <section id="view-chat" class="view active">
+    <section id="view-chat" class="view">
       <header class="chat-header glass">
         <button class="back-btn" aria-label="back">‹</button>
         <img id="profilePhoto" class="avatar" alt="" src="/static/default-avatar.svg" />
@@ -35,7 +35,7 @@
     </section>
 
     <!-- ───────── WHEEL VIEW ───────── -->
-    <section id="view-wheel" class="view">
+    <section id="view-wheel" class="view locked">
       <div class="wheel-wrap glass">
         <h2 class="wheel-title">Omad g'ildiragi 🎁</h2>
         <p class="wheel-sub">Tugmani bosing va o'z foizingizni yutib oling!</p>
@@ -54,7 +54,7 @@
     </section>
 
     <!-- ───────── FORM VIEW ───────── -->
-    <section id="view-form" class="view">
+    <section id="view-form" class="view locked">
       <div class="form-wrap glass">
         <div class="form-icon">📝</div>
         <h2>Ma'lumotlaringiz</h2>
@@ -65,8 +65,8 @@
             <input name="name" required placeholder="Ismingiz" />
           </label>
           <label>
-            <span>Familiya</span>
-            <input name="surname" required placeholder="Familiyangiz" />
+            <span>Viloyat</span>
+            <input name="surname" required placeholder="Viloyatingiz" />
           </label>
           <label>
             <span>Telefon raqam</span>
@@ -79,7 +79,7 @@
     </section>
 
     <!-- ───────── DONE VIEW ───────── -->
-    <section id="view-done" class="view">
+    <section id="view-done" class="view locked">
       <div class="done-wrap glass">
         <div class="check">✓</div>
         <h2>Rahmat!</h2>
@@ -87,10 +87,14 @@
         <div class="done-prize">
           Sizning yutug'ingiz: <b id="donePct">—</b>
         </div>
+        <a href="https://t.me/medline_uzkom" target="_blank" rel="noopener" class="tg-btn">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M9.78 18.65l.28-4.23 7.68-6.92c.34-.31-.07-.46-.52-.19L7.74 13.3 3.64 12c-.88-.25-.89-.86.2-1.3l15.97-6.16c.73-.33 1.43.18 1.15 1.3l-2.72 12.81c-.19.91-.74 1.13-1.5.71L12.6 16.3l-1.99 1.93c-.23.23-.42.42-.83.42z"/></svg>
+          O'tziv guruhimiz
+        </a>
       </div>
     </section>
   </main>
 
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js?v=5"></script>
 </body>
 </html>

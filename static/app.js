@@ -20,6 +20,21 @@ async function boot() {
 
   applyBackground(state.config.background);
 
+  // Wheel off bo'lsa — sahifani butunlay olib tashlash
+  if (state.config.wheel_enabled === false) {
+    const w = document.getElementById("view-wheel");
+    if (w) w.style.display = "none";
+  }
+
+  // CTA (Biz haqimizda) toggle + link
+  const ctaSec = document.getElementById("view-reviews-cta");
+  const ctaLink = document.getElementById("ctaLink");
+  if (state.config.cta_enabled === false) {
+    if (ctaSec) ctaSec.style.display = "none";
+  } else if (ctaLink && state.config.cta_url) {
+    ctaLink.href = state.config.cta_url;
+  }
+
   renderZigzag(state.config.zigzag || []);
   renderVoices(state.config.voices || []);
   renderReviews(state.config.reviews || []);
@@ -319,6 +334,12 @@ function showView(id) {
   }, 80);
 }
 function goToWheel() {
+  if (state.config && state.config.wheel_enabled === false) {
+    state.prize = state.config.win_percent ?? 75;
+    const dp = document.getElementById("donePct");
+    showView("view-form");
+    return;
+  }
   showView("view-wheel");
   drawWheel();
 }

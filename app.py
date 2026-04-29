@@ -567,6 +567,10 @@ class EditBgLabel(StatesGroup):
     pass
 
 
+class EditCtaUrl(StatesGroup):
+    waiting_url = State()
+
+
 def main_menu_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🏷 Sarlavha", callback_data="set:name"),
@@ -577,7 +581,9 @@ def main_menu_kb() -> InlineKeyboardMarkup:
          InlineKeyboardButton(text="📋 Guruhlar", callback_data="g:list")],
         [InlineKeyboardButton(text="📊 Holat", callback_data="status"),
          InlineKeyboardButton(text="📥 Lidlar", callback_data="leads")],
-        [InlineKeyboardButton(text="🎨 Fon", callback_data="bg:menu")],
+        [InlineKeyboardButton(text="🎨 Fon", callback_data="bg:menu"),
+         InlineKeyboardButton(text="🎰 Baraban", callback_data="wheel:menu")],
+        [InlineKeyboardButton(text="📣 Biz haqimizda", callback_data="cta:menu")],
     ])
 
 
@@ -1697,6 +1703,78 @@ def build_dispatcher() -> Dispatcher:
         rows.append([InlineKeyboardButton(text="◀️ Orqaga", callback_data="nav:menu")])
         return InlineKeyboardMarkup(inline_keyboard=rows)
 
+    @dp.callback_query(F.data == "wheel:menu")
+    async def cb_wheel_menu(cb: CallbackQuery, state: FSMContext):
+        await state.clear()
+        enabled = (await get_setting("wheel_enabled", "1")) == "1"
+        status = "🟢 Yoqilgan" if enabled else "🔴 O'chirilgan"
+        toggle_text = "🔴 O'chirish" if enabled else "🟢 Yoqish"
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=toggle_text, callback_data="wheel:toggle")],
+            [InlineKeyboardButton(text="◀️ Orqaga", callback_data="nav:menu")],
+        ])
+        await cb.message.edit_text(
+            f"🎰 <b>Baraban (g'ildirak)</b>\n\n"
+            f"Holat: {status}\n\n"
+            f"O'chirilsa — saytda baraban ko'rsatilmaydi, foydalanuvchi to'g'ridan-to'g'ri "
+            f"forma sahifasiga o'tadi (yutuq foizi avtomatik beriladi).",
+            reply_markup=kb
+        )
+        await cb.answer()
+
+    @dp.callback_query(F.data == "wheel:toggle")
+    async def cb_wheel_toggle(cb: CallbackQuery, state: FSMContext):
+        cur = (await get_setting("wheel_enabled", "1")) == "1"
+        await set_setting("wheel_enabled", "0" if cur else "1")
+        await cb_wheel_menu(cb, state)
+
+    @dp.callback_query(F.data == "cta:menu")
+    async def cb_cta_menu(cb: CallbackQuery, state: FSMContext):
+        await state.clear()
+        enabled = (await get_setting("cta_enabled", "1")) == "1"
+        url = await get_setting("cta_url", "https://t.me/medline_uzkom")
+        status = "🟢 Yoqilgan" if enabled else "🔴 O'chirilgan"
+        toggle_text = "🔴 O'chirish" if enabled else "🟢 Yoqish"
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=toggle_text, callback_data="cta:toggle")],
+            [InlineKeyboardButton(text="🔗 Linkni o'zgartirish", callback_data="cta:url")],
+            [InlineKeyboardButton(text="◀️ Orqaga", callback_data="nav:menu")],
+        ])
+        await cb.message.edit_text(
+            f"📣 <b>Biz haqimizda tugmasi</b>\n\n"
+            f"Holat: {status}\n"
+            f"Link: <code>{url}</code>\n\n"
+            f"O'chirilsa — saytda tugma ko'rinmaydi.",
+            reply_markup=kb
+        )
+        await cb.answer()
+
+    @dp.callback_query(F.data == "cta:toggle")
+    async def cb_cta_toggle(cb: CallbackQuery, state: FSMContext):
+        cur = (await get_setting("cta_enabled", "1")) == "1"
+        await set_setting("cta_enabled", "0" if cur else "1")
+        await cb_cta_menu(cb, state)
+
+    @dp.callback_query(F.data == "cta:url")
+    async def cb_cta_url(cb: CallbackQuery, state: FSMContext):
+        await state.set_state(EditCtaUrl.waiting_url)
+        await cb.message.answer(
+            "🔗 Yangi linkni yuboring (masalan: https://t.me/yourchannel)",
+            reply_markup=back_kb("menu")
+        )
+        await cb.answer()
+
+    @dp.message(EditCtaUrl.waiting_url, F.text)
+    async def cta_url_text(m: Message, state: FSMContext):
+        if not is_admin(m.from_user.id):
+            return
+        url = m.text.strip()
+        if not (url.startswith("http://") or url.startswith("https://")):
+            return await m.answer("❌ Link http:// yoki https:// bilan boshlanishi kerak.")
+        await set_setting("cta_url", url)
+        await state.clear()
+        await m.answer(f"✅ Link yangilandi:\n<code>{url}</code>", reply_markup=main_menu_kb())
+
     @dp.callback_query(F.data == "bg:menu")
     async def cb_bg_menu(cb: CallbackQuery, state: FSMContext):
         await state.clear()
@@ -1865,6 +1943,9 @@ async def api_config():
         "reviews": await get_reviews(),
         "questions": await get_questions(),
         "background": await bg_get_active(),
+        "wheel_enabled": (await get_setting("wheel_enabled", "1")) == "1",
+        "cta_enabled": (await get_setting("cta_enabled", "1")) == "1",
+        "cta_url": await get_setting("cta_url", "https://t.me/medline_uzkom"),
     }
 
 

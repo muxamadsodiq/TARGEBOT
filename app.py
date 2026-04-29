@@ -88,6 +88,22 @@ async def init_db():
             await db.commit()
         except Exception:
             pass
+        # migration: add badge_emoji and badge_text to zigzag
+        try:
+            await db.execute("ALTER TABLE zigzag ADD COLUMN badge_emoji TEXT NOT NULL DEFAULT ''")
+            await db.commit()
+        except Exception:
+            pass
+        try:
+            await db.execute("ALTER TABLE zigzag ADD COLUMN badge_text TEXT NOT NULL DEFAULT ''")
+            await db.commit()
+        except Exception:
+            pass
+        try:
+            await db.execute("ALTER TABLE zigzag ADD COLUMN badge_image TEXT NOT NULL DEFAULT ''")
+            await db.commit()
+        except Exception:
+            pass
         # reviews table
         await db.execute("""
         CREATE TABLE IF NOT EXISTS reviews(
@@ -164,16 +180,57 @@ async def init_db():
                     "INSERT INTO zigzag(position,text) VALUES(?,?)", (i, t)
                 )
             await db.commit()
+        # backgrounds table
+        await db.execute("""
+        CREATE TABLE IF NOT EXISTS backgrounds(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            kind TEXT NOT NULL DEFAULT 'image',
+            value TEXT NOT NULL DEFAULT '',
+            label TEXT NOT NULL DEFAULT '',
+            is_active INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )""")
+        await db.commit()
+        cur = await db.execute("SELECT COUNT(*) FROM backgrounds WHERE label='__default__'")
+        (bn,) = await cur.fetchone()
+        if bn == 0:
+            default_grad = (
+                "radial-gradient(1200px 800px at 10% -10%,#5b2bff33 0%,transparent 60%),"
+                "radial-gradient(900px 700px at 110% 110%,#ff2bd633 0%,transparent 60%),"
+                "linear-gradient(160deg,#0d0b1f 0%,#1a1538 50%,#0d0b1f 100%)"
+            )
+            presets = [
+                ("gradient", default_grad, "__default__", 1),
+                ("gradient", "linear-gradient(135deg,#0f2027,#203a43,#2c5364)", "Tinch ko'k", 0),
+                ("gradient", "linear-gradient(135deg,#1a1a2e,#16213e,#0f3460)", "Kosmos", 0),
+                ("gradient", "linear-gradient(135deg,#000428,#004e92)", "Tungi dengiz", 0),
+                ("gradient", "linear-gradient(135deg,#232526,#414345)", "Qora kulrang", 0),
+                ("gradient", "linear-gradient(135deg,#1f1c2c,#928dab)", "Binafsha tutun", 0),
+            ]
+            for kind, val, label, active in presets:
+                await db.execute(
+                    "INSERT INTO backgrounds(kind,value,label,is_active) VALUES(?,?,?,?)",
+                    (kind, val, label, active)
+                )
+            await db.commit()
 
 
 async def get_zigzag():
     async with aiosqlite.connect(DB_PATH) as db:
         cur = await db.execute(
-            "SELECT id,title,text,image FROM zigzag ORDER BY position ASC, id ASC"
+            "SELECT id,title,text,image,badge_emoji,badge_text,badge_image FROM zigzag ORDER BY position ASC, id ASC"
         )
         rows = await cur.fetchall()
     return [
-        {"id": r[0], "title": r[1] or "", "text": r[2] or "", "image": r[3] or ""}
+        {
+            "id": r[0],
+            "title": r[1] or "",
+            "text": r[2] or "",
+            "image": r[3] or "",
+            "badge_emoji": r[4] or "",
+            "badge_text": r[5] or "",
+            "badge_image": r[6] or "",
+        }
         for r in rows
     ]
 
@@ -208,22 +265,135 @@ async def delete_step(sid: int):
         await db.commit()
 
 
-async def add_zigzag(title: str, text: str, image: str = "") -> int:
+async def add_zigzag(title: str, text: str, image: str = "", badge_emoji: str = "", badge_text: str = "", badge_image: str = "") -> int:
     async with aiosqlite.connect(DB_PATH) as db:
         cur = await db.execute("SELECT COALESCE(MAX(position), -1) FROM zigzag")
         (mx,) = await cur.fetchone()
         cur = await db.execute(
-            "INSERT INTO zigzag(position,title,text,image) VALUES(?,?,?,?)",
-            (mx + 1, title, text, image),
+            "INSERT INTO zigzag(position,title,text,image,badge_emoji,badge_text,badge_image) VALUES(?,?,?,?,?,?,?)",
+            (mx + 1, title, text, image, badge_emoji, badge_text, badge_image),
         )
         await db.commit()
         return cur.lastrowid
+
+
+async def update_zigzag_badge(zid: int, badge_emoji: str, badge_text: str, badge_image: str = ""):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE zigzag SET badge_emoji=?, badge_text=?, badge_image=? WHERE id=?",
+            (badge_emoji, badge_text, badge_image, zid),
+        )
+        await db.commit()
+
+
+async def update_zigzag_field(zid: int, field: str, value: str):
+    if field not in ("title", "text", "image"):
+        return
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(f"UPDATE zigzag SET {field}=? WHERE id=?", (value, zid))
+        await db.commit()
+
+
+def parse_badge(raw: str):
+    """Split user input into (emoji, text). Takes leading emoji(s) — including multi-codepoint flag emoji — as the badge symbol, rest as text."""
+    import unicodedata
+    s = (raw or "").strip()
+    if not s:
+        return "", ""
+    # Walk while characters are emoji-like (symbols, regional indicators, ZWJ, variation selectors, surrogates)
+    end = 0
+    for i, ch in enumerate(s):
+        cat = unicodedata.category(ch)
+        cp = ord(ch)
+        is_regional = 0x1F1E6 <= cp <= 0x1F1FF  # flag letters
+        is_emoji_block = (
+            0x1F000 <= cp <= 0x1FFFF
+            or 0x2600 <= cp <= 0x27BF
+            or 0x2B00 <= cp <= 0x2BFF
+        )
+        is_modifier = ch in ("\u200d", "\ufe0f", "\u20e3")
+        if cat.startswith(("S", "M")) or is_regional or is_emoji_block or is_modifier:
+            end = i + 1
+        else:
+            if end > 0 and ch == " ":
+                # consume one separating space
+                end = i + 1
+                break
+            break
+    emoji = s[:end].strip()
+    text = s[end:].strip()
+    if not emoji and text:
+        # whole input is text only
+        return "", text
+    return emoji, text
 
 
 async def delete_zigzag(zid: int):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("DELETE FROM zigzag WHERE id=?", (zid,))
         await db.commit()
+
+
+# ───── backgrounds ─────
+async def bg_list():
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute(
+            "SELECT id,kind,value,label,is_active FROM backgrounds ORDER BY id ASC"
+        )
+        rows = await cur.fetchall()
+    return [
+        {"id": r[0], "kind": r[1], "value": r[2], "label": r[3], "is_active": bool(r[4])}
+        for r in rows
+    ]
+
+
+async def bg_get_active():
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute(
+            "SELECT id,kind,value,label FROM backgrounds WHERE is_active=1 LIMIT 1"
+        )
+        r = await cur.fetchone()
+        if not r:
+            cur = await db.execute(
+                "SELECT id,kind,value,label FROM backgrounds WHERE label='__default__' LIMIT 1"
+            )
+            r = await cur.fetchone()
+    if not r:
+        return None
+    return {"id": r[0], "kind": r[1], "value": r[2], "label": r[3]}
+
+
+async def bg_set_active(bid: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("UPDATE backgrounds SET is_active=0")
+        await db.execute("UPDATE backgrounds SET is_active=1 WHERE id=?", (bid,))
+        await db.commit()
+
+
+async def bg_add(kind: str, value: str, label: str) -> int:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute(
+            "INSERT INTO backgrounds(kind,value,label,is_active) VALUES(?,?,?,0)",
+            (kind, value, label)
+        )
+        await db.commit()
+        return cur.lastrowid
+
+
+async def bg_delete(bid: int) -> bool:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute("SELECT label,is_active FROM backgrounds WHERE id=?", (bid,))
+        row = await cur.fetchone()
+        if not row:
+            return False
+        label, is_active = row
+        if label == "__default__":
+            return False  # asl fonni hech qachon o'chirib bo'lmaydi
+        await db.execute("DELETE FROM backgrounds WHERE id=?", (bid,))
+        if is_active:
+            await db.execute("UPDATE backgrounds SET is_active=1 WHERE label='__default__'")
+        await db.commit()
+        return True
 
 
 async def get_reviews():
@@ -358,6 +528,17 @@ class AddZig(StatesGroup):
     title = State()
     text = State()
     image = State()
+    badge_emoji = State()
+    badge_text = State()
+
+
+class EditZigBadge(StatesGroup):
+    waiting_emoji = State()
+    waiting_text = State()
+
+
+class EditZigField(StatesGroup):
+    waiting_value = State()
 
 
 class AddRev(StatesGroup):
@@ -377,6 +558,15 @@ class EditField(StatesGroup):
     waiting = State()  # generic: name / subtitle / percent / photo
 
 
+class AddBg(StatesGroup):
+    waiting_image = State()
+    waiting_label = State()
+
+
+class EditBgLabel(StatesGroup):
+    pass
+
+
 def main_menu_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🏷 Sarlavha", callback_data="set:name"),
@@ -387,6 +577,7 @@ def main_menu_kb() -> InlineKeyboardMarkup:
          InlineKeyboardButton(text="📋 Guruhlar", callback_data="g:list")],
         [InlineKeyboardButton(text="📊 Holat", callback_data="status"),
          InlineKeyboardButton(text="📥 Lidlar", callback_data="leads")],
+        [InlineKeyboardButton(text="🎨 Fon", callback_data="bg:menu")],
     ])
 
 
@@ -717,10 +908,41 @@ def build_dispatcher() -> Dispatcher:
             kb = await steps_menu_kb_local()
             await cb.message.edit_text("✅ Xabar qo'shildi", reply_markup=kb)
         elif cur_state == AddZig.image.state:
-            await add_zigzag(data.get("title", ""), data.get("text", ""), "")
+            await state.update_data(image="")
+            await state.set_state(AddZig.badge_emoji)
+            await cb.message.edit_text(
+                "4-qadam: 🏳 <b>bayroq</b>ni yuboring — emoji (masalan <code>🇵🇰</code>) yoki <b>rasm</b> sifatida yuklang.\n"
+                "Yoki ⏭ tugmasini bosing — bayroqsiz qoladi.",
+                reply_markup=ZIG_BADGE_SKIP_KB,
+            )
+        elif cur_state == AddZig.badge_emoji.state:
+            # skipped emoji → finish without badge
+            data = await state.get_data()
+            await add_zigzag(
+                data.get("title", ""),
+                data.get("text", ""),
+                data.get("image", ""),
+                "",
+                "",
+                "",
+            )
             await state.clear()
             kb = await zig_menu_kb_local()
-            await cb.message.edit_text("✅ Zigzag qatori qo'shildi (rasmsiz)", reply_markup=kb)
+            await cb.message.edit_text("✅ Zigzag qatori qo'shildi (bayroqsiz)", reply_markup=kb)
+        elif cur_state == AddZig.badge_text.state:
+            # skipped text → save with emoji/image only
+            data = await state.get_data()
+            await add_zigzag(
+                data.get("title", ""),
+                data.get("text", ""),
+                data.get("image", ""),
+                data.get("badge_emoji", ""),
+                "",
+                data.get("badge_image", ""),
+            )
+            await state.clear()
+            kb = await zig_menu_kb_local()
+            await cb.message.edit_text("✅ Zigzag qatori qo'shildi (faqat bayroq)", reply_markup=kb)
         else:
             await cb.answer()
             return
@@ -766,6 +988,13 @@ def build_dispatcher() -> Dispatcher:
 
     def zig_view_kb(zid: int) -> InlineKeyboardMarkup:
         return InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✏️ Sarlavha", callback_data=f"z:edit:title:{zid}"),
+             InlineKeyboardButton(text="✏️ Matn", callback_data=f"z:edit:text:{zid}")],
+            [InlineKeyboardButton(text="🖼 Rasmni almashtirish", callback_data=f"z:edit:image:{zid}")],
+            [InlineKeyboardButton(text="🏳 Bayroq+matn tahrirlash", callback_data=f"z:badge:{zid}")],
+            [InlineKeyboardButton(text="🚫 Faqat bayroqni olish", callback_data=f"z:rmflag:{zid}"),
+             InlineKeyboardButton(text="🚫 Faqat matnni olish", callback_data=f"z:rmtxt:{zid}")],
+            [InlineKeyboardButton(text="🚫 Hammasini olib tashlash", callback_data=f"z:nobadge:{zid}")],
             [InlineKeyboardButton(text="🗑 O'chirish", callback_data=f"z:del:{zid}")],
             [InlineKeyboardButton(text="◀️ Ro'yxat", callback_data="z:menu")],
         ])
@@ -782,8 +1011,152 @@ def build_dispatcher() -> Dispatcher:
         info = f"<b>#{z['id']}</b>\n\n{title_line}{z['text'] or empty}\n"
         if z["image"]:
             info += f"\n🖼 Rasm: <code>{z['image']}</code>"
+        if z.get("badge_emoji") or z.get("badge_text") or z.get("badge_image"):
+            badge_disp = z.get('badge_emoji','') or ('🖼' if z.get('badge_image') else '')
+            info += f"\n🏳 Bayroq: {badge_disp} {z.get('badge_text','')}"
+            if z.get('badge_image'):
+                info += f"\n📎 Bayroq rasmi: <code>{z['badge_image']}</code>"
         await cb.message.edit_text(info, reply_markup=zig_view_kb(zid))
         await cb.answer()
+
+    @dp.callback_query(F.data.startswith("z:edit:"))
+    async def cb_z_edit(cb: CallbackQuery, state: FSMContext):
+        parts = cb.data.split(":")
+        # z:edit:<field>:<zid>
+        field = parts[2]
+        zid = int(parts[3])
+        await state.set_state(EditZigField.waiting_value)
+        await state.update_data(zid=zid, field=field)
+        labels = {
+            "title": "yangi <b>sarlavha</b>ni yuboring (avtomatik KATTA harfga aylantiriladi)",
+            "text": "yangi <b>matn</b>ni yuboring",
+            "image": "yangi <b>rasm</b>ni yuboring (foto sifatida)",
+        }
+        await cb.message.edit_text(
+            f"#{zid} uchun {labels.get(field, 'qiymat')}.",
+            reply_markup=back_kb("z"),
+        )
+        await cb.answer()
+
+    @dp.message(EditZigField.waiting_value, F.photo)
+    async def edit_zig_field_photo(m: Message, state: FSMContext):
+        if not is_admin(m.from_user.id):
+            return
+        data = await state.get_data()
+        if data.get("field") != "image":
+            return await m.answer("Bu qadamda rasm kerak emas.")
+        zid = int(data.get("zid"))
+        photo = m.photo[-1]
+        file = await m.bot.get_file(photo.file_id)
+        out = UPLOAD_DIR / f"zig_{photo.file_unique_id}.jpg"
+        await m.bot.download_file(file.file_path, destination=out)
+        await update_zigzag_field(zid, "image", f"/static/uploads/{out.name}")
+        await state.clear()
+        kb = await zig_menu_kb_local()
+        await m.answer("✅ Rasm yangilandi", reply_markup=kb)
+
+    @dp.message(EditZigField.waiting_value, F.text)
+    async def edit_zig_field_text(m: Message, state: FSMContext):
+        if not is_admin(m.from_user.id):
+            return
+        data = await state.get_data()
+        zid = int(data.get("zid"))
+        field = data.get("field")
+        val = (m.text or "").strip()
+        if field == "title":
+            val = val.upper()
+        if field == "image":
+            return await m.answer("Iltimos, rasm yuboring.")
+        await update_zigzag_field(zid, field, val)
+        await state.clear()
+        kb = await zig_menu_kb_local()
+        await m.answer("✅ Yangilandi", reply_markup=kb)
+
+    @dp.callback_query(F.data.startswith("z:badge:"))
+    async def cb_z_badge(cb: CallbackQuery, state: FSMContext):
+        zid = int(cb.data.split(":")[2])
+        await state.set_state(EditZigBadge.waiting_emoji)
+        await state.update_data(zid=zid)
+        await cb.message.edit_text(
+            f"🏳 #{zid} uchun yangi <b>bayroq</b>ni yuboring — emoji (<code>🇵🇰</code>) yoki <b>rasm</b> sifatida.\n"
+            "Yoki ⏭ — bayroqni o'chirib, faqat matnni saqlash uchun.",
+            reply_markup=ZIG_BADGE_SKIP_KB,
+        )
+        await cb.answer()
+
+    @dp.message(EditZigBadge.waiting_emoji, F.text)
+    async def edit_zig_badge_emoji(m: Message, state: FSMContext):
+        if not is_admin(m.from_user.id):
+            return
+        emoji = (m.text or "").strip()
+        await state.update_data(badge_emoji=emoji, badge_image="")
+        await state.set_state(EditZigBadge.waiting_text)
+        await m.answer(
+            "Endi ✍️ <b>matn</b>ni alohida yuboring.\n"
+            "Masalan: <code>Pokistonda ishlab chiqarilgan</code>",
+            reply_markup=back_kb("z"),
+        )
+
+    @dp.message(EditZigBadge.waiting_emoji, F.photo)
+    async def edit_zig_badge_photo(m: Message, state: FSMContext):
+        if not is_admin(m.from_user.id):
+            return
+        photo = m.photo[-1]
+        file = await m.bot.get_file(photo.file_id)
+        out = UPLOAD_DIR / f"flag_{photo.file_unique_id}.jpg"
+        await m.bot.download_file(file.file_path, destination=out)
+        await state.update_data(badge_emoji="", badge_image=f"/static/uploads/{out.name}")
+        await state.set_state(EditZigBadge.waiting_text)
+        await m.answer(
+            "Endi ✍️ <b>matn</b>ni alohida yuboring.",
+            reply_markup=back_kb("z"),
+        )
+
+    @dp.message(EditZigBadge.waiting_text, F.text)
+    async def edit_zig_badge_text(m: Message, state: FSMContext):
+        if not is_admin(m.from_user.id):
+            return
+        data = await state.get_data()
+        zid = int(data.get("zid"))
+        emoji = data.get("badge_emoji", "")
+        badge_image = data.get("badge_image", "")
+        txt = (m.text or "").strip()
+        await update_zigzag_badge(zid, emoji, txt, badge_image)
+        await state.clear()
+        kb = await zig_menu_kb_local()
+        await m.answer("✅ Bayroq saqlandi", reply_markup=kb)
+
+    @dp.callback_query(F.data.startswith("z:nobadge:"))
+    async def cb_z_nobadge(cb: CallbackQuery):
+        zid = int(cb.data.split(":")[2])
+        await update_zigzag_badge(zid, "", "", "")
+        await cb.answer("🚫 Bayroq olindi")
+        kb = await zig_menu_kb_local()
+        await cb.message.edit_text("🔀 <b>Zigzag</b>", reply_markup=kb)
+
+    @dp.callback_query(F.data.startswith("z:rmflag:"))
+    async def cb_z_rmflag(cb: CallbackQuery):
+        zid = int(cb.data.split(":")[2])
+        zz = await get_zigzag()
+        z = next((x for x in zz if x["id"] == zid), None)
+        if not z:
+            return await cb.answer("Topilmadi", show_alert=True)
+        await update_zigzag_badge(zid, "", z.get("badge_text", ""), "")
+        await cb.answer("🚫 Faqat bayroq olindi")
+        kb = await zig_menu_kb_local()
+        await cb.message.edit_text("🔀 <b>Zigzag</b>", reply_markup=kb)
+
+    @dp.callback_query(F.data.startswith("z:rmtxt:"))
+    async def cb_z_rmtxt(cb: CallbackQuery):
+        zid = int(cb.data.split(":")[2])
+        zz = await get_zigzag()
+        z = next((x for x in zz if x["id"] == zid), None)
+        if not z:
+            return await cb.answer("Topilmadi", show_alert=True)
+        await update_zigzag_badge(zid, z.get("badge_emoji", ""), "", z.get("badge_image", ""))
+        await cb.answer("🚫 Faqat matn olindi")
+        kb = await zig_menu_kb_local()
+        await cb.message.edit_text("🔀 <b>Zigzag</b>", reply_markup=kb)
 
     @dp.callback_query(F.data.startswith("z:del:"))
     async def cb_z_del(cb: CallbackQuery):
@@ -798,11 +1171,16 @@ def build_dispatcher() -> Dispatcher:
         [InlineKeyboardButton(text="◀️ Bekor qilish", callback_data="nav:z")],
     ])
 
+    ZIG_BADGE_SKIP_KB = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⏭ Bayroqsiz qo'shish", callback_data="s:skip")],
+        [InlineKeyboardButton(text="◀️ Bekor qilish", callback_data="nav:z")],
+    ])
+
     @dp.message(AddZig.title, F.text)
     async def addzig_title(m: Message, state: FSMContext):
         if not is_admin(m.from_user.id):
             return
-        await state.update_data(title=m.text.strip())
+        await state.update_data(title=m.text.strip().upper())
         await state.set_state(AddZig.text)
         await m.answer(
             "2-qadam: <b>matn</b>ni yuboring (sarlavha ostidagi tafsilot).",
@@ -828,11 +1206,60 @@ def build_dispatcher() -> Dispatcher:
         file = await m.bot.get_file(photo.file_id)
         out = UPLOAD_DIR / f"zig_{photo.file_unique_id}.jpg"
         await m.bot.download_file(file.file_path, destination=out)
+        await state.update_data(image=f"/static/uploads/{out.name}")
+        await state.set_state(AddZig.badge_emoji)
+        await m.answer(
+            "4-qadam: 🏳 <b>bayroq emojini</b> alohida yuboring (masalan: <code>🇵🇰</code>).\n"
+            "Yoki ⏭ tugmasini bosing — bayroqsiz qoladi.",
+            reply_markup=ZIG_BADGE_SKIP_KB,
+        )
+
+    @dp.message(AddZig.badge_emoji, F.text)
+    async def addzig_badge_emoji(m: Message, state: FSMContext):
+        if not is_admin(m.from_user.id):
+            return
+        emoji = (m.text or "").strip()
+        await state.update_data(badge_emoji=emoji, badge_image="")
+        await state.set_state(AddZig.badge_text)
+        await m.answer(
+            "5-qadam: ✍️ <b>matn</b>ni alohida yuboring (masalan: <code>Pokistonda ishlab chiqarilgan</code>).\n"
+            "Yoki ⏭ tugmasini bosing — faqat bayroq qoladi.",
+            reply_markup=ZIG_BADGE_SKIP_KB,
+        )
+
+    @dp.message(AddZig.badge_emoji, F.photo)
+    async def addzig_badge_photo(m: Message, state: FSMContext):
+        if not is_admin(m.from_user.id):
+            return
+        photo = m.photo[-1]
+        file = await m.bot.get_file(photo.file_id)
+        out = UPLOAD_DIR / f"flag_{photo.file_unique_id}.jpg"
+        await m.bot.download_file(file.file_path, destination=out)
+        await state.update_data(badge_emoji="", badge_image=f"/static/uploads/{out.name}")
+        await state.set_state(AddZig.badge_text)
+        await m.answer(
+            "5-qadam: ✍️ <b>matn</b>ni alohida yuboring (masalan: <code>Pokistonda ishlab chiqarilgan</code>).\n"
+            "Yoki ⏭ tugmasini bosing — faqat bayroq rasmi qoladi.",
+            reply_markup=ZIG_BADGE_SKIP_KB,
+        )
+
+    @dp.message(AddZig.badge_text, F.text)
+    async def addzig_badge_text(m: Message, state: FSMContext):
+        if not is_admin(m.from_user.id):
+            return
+        txt = (m.text or "").strip()
         data = await state.get_data()
-        await add_zigzag(data.get("title", ""), data.get("text", ""), f"/static/uploads/{out.name}")
+        await add_zigzag(
+            data.get("title", ""),
+            data.get("text", ""),
+            data.get("image", ""),
+            data.get("badge_emoji", ""),
+            txt,
+            data.get("badge_image", ""),
+        )
         await state.clear()
         kb = await zig_menu_kb_local()
-        await m.answer("✅ Zigzag qatori qo'shildi", reply_markup=kb)
+        await m.answer("✅ Zigzag qatori qo'shildi (bayroq bilan)", reply_markup=kb)
 
 
     # ───── Reviews (otzivlar) ─────
@@ -1252,6 +1679,141 @@ def build_dispatcher() -> Dispatcher:
         await add_admin_group(m.chat.id, m.chat.title or "")
         await m.answer("✅ Guruh ro'yxatga olindi. Yangi lidlar shu yerga ham tushadi.")
 
+    # ───────── Fon (background) ─────────
+    async def bg_menu_kb_local() -> InlineKeyboardMarkup:
+        items = await bg_list()
+        rows = []
+        for b in items:
+            label = b["label"] if b["label"] != "__default__" else "🌌 Asl fon"
+            mark = "✅ " if b["is_active"] else ""
+            icon = "🖼" if b["kind"] == "image" else "🎨"
+            rows.append([
+                InlineKeyboardButton(
+                    text=f"{mark}{icon} {label}",
+                    callback_data=f"bg:view:{b['id']}"
+                )
+            ])
+        rows.append([InlineKeyboardButton(text="➕ Rasm yuklash", callback_data="bg:add")])
+        rows.append([InlineKeyboardButton(text="◀️ Orqaga", callback_data="nav:menu")])
+        return InlineKeyboardMarkup(inline_keyboard=rows)
+
+    @dp.callback_query(F.data == "bg:menu")
+    async def cb_bg_menu(cb: CallbackQuery, state: FSMContext):
+        await state.clear()
+        kb = await bg_menu_kb_local()
+        await cb.message.edit_text(
+            "🎨 <b>Fon boshqaruvi</b>\n\n"
+            "Saqlangan fonlar ro'yxati. Bittasini tanlasangiz — saytda darhol qo'llanadi.\n"
+            "Asl fon hech qachon o'chmaydi — istalgan vaqtda qaytarib qo'yishingiz mumkin.\n"
+            "Yangi rasm yuklash ham mumkin.",
+            reply_markup=kb
+        )
+        await cb.answer()
+
+    @dp.callback_query(F.data == "nav:bg")
+    async def nav_bg(cb: CallbackQuery, state: FSMContext):
+        await state.clear()
+        kb = await bg_menu_kb_local()
+        await cb.message.edit_text("🎨 <b>Fon</b>", reply_markup=kb)
+        await cb.answer()
+
+    @dp.callback_query(F.data.startswith("bg:view:"))
+    async def cb_bg_view(cb: CallbackQuery):
+        bid = int(cb.data.split(":")[2])
+        items = await bg_list()
+        b = next((x for x in items if x["id"] == bid), None)
+        if not b:
+            return await cb.answer("Topilmadi", show_alert=True)
+        label = b["label"] if b["label"] != "__default__" else "🌌 Asl fon"
+        kind_label = "🖼 Rasm" if b["kind"] == "image" else "🎨 Gradient"
+        active_line = "✅ <b>Hozir faol</b>\n\n" if b["is_active"] else ""
+        rows = []
+        if not b["is_active"]:
+            rows.append([InlineKeyboardButton(text="✅ Faollashtirish", callback_data=f"bg:set:{bid}")])
+        if b["label"] != "__default__":
+            rows.append([InlineKeyboardButton(text="🗑 O'chirish", callback_data=f"bg:del:{bid}")])
+        rows.append([InlineKeyboardButton(text="◀️ Ro'yxat", callback_data="bg:menu")])
+        kb = InlineKeyboardMarkup(inline_keyboard=rows)
+        text = (
+            f"{active_line}"
+            f"<b>{label}</b>\n"
+            f"Turi: {kind_label}\n"
+        )
+        if b["kind"] == "image":
+            try:
+                await cb.message.delete()
+            except Exception:
+                pass
+            await cb.message.answer_photo(
+                photo=FSInputFile(str(BASE_DIR / b["value"].lstrip("/"))),
+                caption=text, reply_markup=kb
+            )
+        else:
+            await cb.message.edit_text(text, reply_markup=kb)
+        await cb.answer()
+
+    @dp.callback_query(F.data.startswith("bg:set:"))
+    async def cb_bg_set(cb: CallbackQuery):
+        bid = int(cb.data.split(":")[2])
+        await bg_set_active(bid)
+        await cb.answer("✅ Faollashtirildi")
+        try:
+            await cb.message.delete()
+        except Exception:
+            pass
+        kb = await bg_menu_kb_local()
+        await cb.message.answer("🎨 <b>Fon</b>", reply_markup=kb)
+
+    @dp.callback_query(F.data.startswith("bg:del:"))
+    async def cb_bg_del(cb: CallbackQuery):
+        bid = int(cb.data.split(":")[2])
+        ok = await bg_delete(bid)
+        if not ok:
+            return await cb.answer("Asl fonni o'chirib bo'lmaydi", show_alert=True)
+        await cb.answer("🗑 O'chirildi")
+        try:
+            await cb.message.delete()
+        except Exception:
+            pass
+        kb = await bg_menu_kb_local()
+        await cb.message.answer("🎨 <b>Fon</b>", reply_markup=kb)
+
+    @dp.callback_query(F.data == "bg:add")
+    async def cb_bg_add(cb: CallbackQuery, state: FSMContext):
+        await state.set_state(AddBg.waiting_image)
+        await cb.message.edit_text(
+            "📤 <b>Yangi fon rasmini yuboring</b>\n\n"
+            "Rasm fon sifatida butun saytni qoplaydi. Eng yaxshisi — qorong'i, kam shovqinli rasm.",
+            reply_markup=back_kb("bg")
+        )
+        await cb.answer()
+
+    @dp.message(AddBg.waiting_image, F.photo)
+    async def addbg_photo(m: Message, state: FSMContext):
+        if not is_admin(m.from_user.id):
+            return
+        photo = m.photo[-1]
+        file = await m.bot.get_file(photo.file_id)
+        out = UPLOAD_DIR / f"bg_{photo.file_unique_id}.jpg"
+        await m.bot.download_file(file.file_path, destination=out)
+        await state.update_data(image_path=f"/static/uploads/{out.name}")
+        await state.set_state(AddBg.waiting_label)
+        await m.answer("📝 Endi shu fon uchun nom yuboring (masalan: <i>Yangi fon</i>)")
+
+    @dp.message(AddBg.waiting_label, F.text)
+    async def addbg_label(m: Message, state: FSMContext):
+        if not is_admin(m.from_user.id):
+            return
+        data = await state.get_data()
+        label = m.text.strip()[:60] or "Fon"
+        await bg_add("image", data["image_path"], label)
+        await state.clear()
+        kb = await bg_menu_kb_local()
+        await m.answer(
+            f"✅ <b>{label}</b> qo'shildi. Faollashtirish uchun ro'yxatdan tanlang.",
+            reply_markup=kb
+        )
+
     return dp
 
 
@@ -1302,7 +1864,13 @@ async def api_config():
         "voices": await get_voices(),
         "reviews": await get_reviews(),
         "questions": await get_questions(),
+        "background": await bg_get_active(),
     }
+
+
+@app.get("/api/bg")
+async def api_bg():
+    return await bg_get_active() or {}
 
 
 class SubmitPayload(BaseModel):

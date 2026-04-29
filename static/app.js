@@ -18,9 +18,23 @@ async function boot() {
   }
   $("#heroTitle").textContent = state.config.name || "Premium";
 
+  applyBackground(state.config.background);
+
   renderZigzag(state.config.zigzag || []);
   renderVoices(state.config.voices || []);
   renderReviews(state.config.reviews || []);
+}
+
+function applyBackground(bg) {
+  if (!bg || !bg.value) return;
+  const orbs = document.querySelector(".bg-orbs");
+  if (bg.kind === "image") {
+    document.body.style.background = `url("${bg.value}") center/cover no-repeat fixed, #0d0b1f`;
+    if (orbs) orbs.style.display = "none";
+  } else {
+    document.body.style.background = bg.value;
+    if (orbs) orbs.style.display = "";
+  }
 }
 
 // ───────────── Zigzag render ─────────────
@@ -34,8 +48,10 @@ function renderZigzag(items) {
   }
   root.style.display = "";
   items.forEach((z, i) => {
+    const isLast = i === items.length - 1;
+    const hasBadge = !!(z.badge_emoji || z.badge_text || z.badge_image);
     const row = document.createElement("div");
-    row.className = "zig-row glass" + (i % 2 === 1 ? " reverse" : "");
+    row.className = "zig-row glass" + (i % 2 === 1 ? " reverse" : "") + (hasBadge ? " last" : "");
 
     const txt = document.createElement("div");
     txt.className = "zig-text";
@@ -60,6 +76,28 @@ function renderZigzag(items) {
     } else {
       img.classList.add("empty");
     }
+
+    if (hasBadge) {
+      const badge = document.createElement("div");
+      badge.className = "made-in-pk";
+      if (z.badge_image) {
+        const flagImg = document.createElement("img");
+        flagImg.className = "pk-flag-img";
+        flagImg.src = z.badge_image;
+        flagImg.alt = "";
+        badge.appendChild(flagImg);
+      } else if (z.badge_emoji) {
+        const emojiSpan = document.createElement("span");
+        emojiSpan.className = "pk-emoji";
+        emojiSpan.textContent = z.badge_emoji;
+        badge.appendChild(emojiSpan);
+      }
+      const textSpan = document.createElement("span");
+      textSpan.textContent = z.badge_text || "";
+      badge.appendChild(textSpan);
+      img.appendChild(badge);
+    }
+
     row.appendChild(txt);
     row.appendChild(img);
     root.appendChild(row);

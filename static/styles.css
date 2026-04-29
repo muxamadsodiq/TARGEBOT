@@ -294,6 +294,66 @@ input{font:inherit}
   object-fit:cover;
   display:block;
 }
+
+/* ─── Last zigzag: image lifted, PK badge below ─── */
+.zig-row.last .zig-img{
+  position: relative;
+  align-self: start;
+  aspect-ratio: auto;
+  height: auto;
+  background: transparent;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.zig-row.last .zig-img > img{
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1/1;
+  object-fit: cover;
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(255,91,228,.18), rgba(124,58,255,.18));
+}
+.zig-row.last .zig-img.empty{
+  aspect-ratio: 1/1;
+  background:linear-gradient(135deg, rgba(255,91,228,.18), rgba(124,58,255,.18));
+  border-radius:16px;
+}
+.made-in-pk{
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, rgba(1,65,28,.25), rgba(255,255,255,.08));
+  border: 1px solid rgba(255,255,255,.12);
+  font-size: 13px;
+  font-weight: 600;
+  color: #eaffea;
+  letter-spacing: .2px;
+  text-align: center;
+}
+.made-in-pk .pk-flag{
+  width: 28px;
+  height: 19px;
+  border-radius: 3px;
+  flex-shrink: 0;
+  box-shadow: 0 1px 4px rgba(0,0,0,.3);
+}
+.made-in-pk .pk-emoji{
+  font-size: 32px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.made-in-pk .pk-flag-img{
+  width: 48px;
+  height: 32px;
+  object-fit: cover;
+  border-radius: 4px;
+  flex-shrink: 0;
+  display: block;
+}
 @keyframes zigIn{
   from{ opacity:0; transform: translateY(14px); }
   to  { opacity:1; transform: translateY(0); }
@@ -309,11 +369,19 @@ input{font:inherit}
   .zig-row.reverse .zig-text{ order:2; }
   .zig-row.reverse .zig-img{ order:1; }
 }
-@media (max-width: 380px){
-  .zig-row, .zig-row.reverse{ grid-template-columns: 1fr; }
-  .zig-row.reverse .zig-text{ order:1; }
-  .zig-row.reverse .zig-img{ order:2; }
-  .zig-img{ aspect-ratio: 16/10; max-height: 220px; }
+@media (max-width: 420px){
+  .zig-row, .zig-row.reverse{
+    grid-template-columns: 1fr 40%;
+    gap: 8px;
+    padding: 10px;
+  }
+  .zig-text{ font-size: 12.5px; line-height: 1.45; }
+  .zig-title{ font-size: 16px; }
+  .zig-img{ aspect-ratio: 1/1; }
+  .made-in-pk{ font-size: 12px; padding: 6px 10px; gap: 6px; }
+  .made-in-pk .pk-flag{ width: 22px; height: 15px; }
+  .made-in-pk .pk-emoji{ font-size: 24px; }
+  .made-in-pk .pk-flag-img{ width: 36px; height: 24px; }
 }
 
 /* ───── Reviews ───── */
